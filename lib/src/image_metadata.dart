@@ -19,16 +19,16 @@ class ImageMetadata {
   ImageMetadata._({
     required this.header,
     required this.segments,
-    required this.appDescription,
     required this.digest,
+    this.appDescription,
   });
 
-  factory ImageMetadata.fromBinaryFile(Uint8List buffer) {
+  factory ImageMetadata.fromBytes(Uint8List buffer) {
     final header = ImageHeader.fromBytes(Uint8List.sublistView(buffer, 0, ImageHeader.size));
     var offset = ImageHeader.size;
     final segments = <({int offset, int length, int address})>[];
     int checksum = ImageMetadata.checksumMagic;
-    late final AppDescription appDescription;
+    late final AppDescription? appDescription;
     for (int i = 0; i < header.segmentCount; i++) {
       final segmentHeaderView = ByteData.sublistView(buffer, offset, offset + 8);
       offset += 8;
@@ -44,7 +44,7 @@ class ImageMetadata {
 
       // Populate app description from first segment
       if (i == 0) {
-        appDescription = AppDescription.fromBytes(data);
+        appDescription = AppDescription.fromBytesOrNull(data);
       }
 
       offset += segment.length;
@@ -86,6 +86,14 @@ class ImageMetadata {
     );
   }
 
+  static ImageMetadata? fromBytesOrNull(Uint8List buffer) {
+    try {
+      return ImageMetadata.fromBytes(buffer);
+    } catch (e) {
+      return null;
+    }
+  }
+
   Map<String, dynamic> toJson() => _$ImageMetadataToJson(this);
 
   @override
@@ -93,9 +101,9 @@ class ImageMetadata {
 
   final ImageHeader header;
   final List<({int offset, int length, int address})> segments;
-  final AppDescription appDescription;
   @JsonKey(toJson: _digestToString)
   Uint8List digest;
+  final AppDescription? appDescription;
 }
 
 /// ESP-IDF firmware image header (`esp_image_header_t`)

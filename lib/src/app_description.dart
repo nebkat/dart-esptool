@@ -50,6 +50,14 @@ class AppDescription {
     );
   }
 
+  static AppDescription? fromBytesOrNull(Uint8List buffer) {
+    try {
+      return AppDescription.fromBytes(buffer);
+    } catch (e) {
+      return null;
+    }
+  }
+
   final String projectName;
   final String version;
   final String idfVersion;
@@ -58,8 +66,10 @@ class AppDescription {
   @JsonKey(includeToJson: false)
   final Uint8List elfSha256;
 
+  String get _versionWithoutV => version.startsWith("v") ? version.substring(1) : version;
+
   @JsonKey(includeFromJson: false, includeToJson: false)
-  Version get semver => Version.parse(version);
+  Version get semver => Version.parse(_versionWithoutV);
   @JsonKey(name: "elfSha256", includeFromJson: false)
   String get elfSha256String => elfSha256.map((e) => e.toRadixString(16).padLeft(2, '0')).join("");
 
