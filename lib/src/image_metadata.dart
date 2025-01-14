@@ -23,7 +23,7 @@ class ImageMetadata {
     this.appDescription,
   });
 
-  factory ImageMetadata.fromBytes(Uint8List buffer) {
+  factory ImageMetadata.fromBytes(Uint8List buffer, { bool appRequired = false }) {
     final header = ImageHeader.fromBytes(Uint8List.sublistView(buffer, 0, ImageHeader.size));
     var offset = ImageHeader.size;
     final segments = <({int offset, int length, int address})>[];
@@ -44,7 +44,7 @@ class ImageMetadata {
 
       // Populate app description from first segment
       if (i == 0) {
-        appDescription = AppDescription.fromBytesOrNull(data);
+        appDescription = appRequired ? AppDescription.fromBytes(data) : AppDescription.fromBytesOrNull(data);
       }
 
       offset += segment.length;
@@ -86,9 +86,9 @@ class ImageMetadata {
     );
   }
 
-  static ImageMetadata? fromBytesOrNull(Uint8List buffer) {
+  static ImageMetadata? fromBytesOrNull(Uint8List buffer, { bool appRequired = false }) {
     try {
-      return ImageMetadata.fromBytes(buffer);
+      return ImageMetadata.fromBytes(buffer, appRequired: appRequired);
     } catch (e) {
       return null;
     }
