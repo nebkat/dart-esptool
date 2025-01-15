@@ -16,8 +16,8 @@ Map<String, dynamic> _$ImageMetadataToJson(ImageMetadata instance) =>
                 'offset': e.offset,
               })
           .toList(),
-      'appDescription': instance.appDescription,
       'digest': _digestToString(instance.digest),
+      'appDescription': instance.appDescription,
     };
 
 Map<String, dynamic> _$ImageHeaderToJson(ImageHeader instance) =>
