@@ -70,6 +70,14 @@ class AppDescription {
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   Version get semver => Version.parse(_versionWithoutV);
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  Version? get semverOrNull {
+    try {
+      return semver;
+    } catch (e) {
+      return null;
+    }
+  }
   @JsonKey(name: "elfSha256", includeFromJson: false)
   String get elfSha256String => elfSha256.map((e) => e.toRadixString(16).padLeft(2, '0')).join("");
 
