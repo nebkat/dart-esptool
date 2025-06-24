@@ -78,11 +78,12 @@ class AppDescription {
       return null;
     }
   }
+
   @JsonKey(name: "elfSha256", includeFromJson: false)
   String get elfSha256String => elfSha256.map((e) => e.toRadixString(16).padLeft(2, '0')).join("");
 
   Map<String, dynamic> toJson() => _$AppDescriptionToJson(this);
 
   @override
-  String toString() => "$runtimeType${toJson()}";
+  String toString() => "${(AppDescription)}${toJson()}";
 }

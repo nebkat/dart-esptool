@@ -23,7 +23,7 @@ class ImageMetadata {
     this.appDescription,
   });
 
-  factory ImageMetadata.fromBytes(Uint8List buffer, { bool appRequired = false }) {
+  factory ImageMetadata.fromBytes(Uint8List buffer, {bool appRequired = false}) {
     final header = ImageHeader.fromBytes(Uint8List.sublistView(buffer, 0, ImageHeader.size));
     var offset = ImageHeader.size;
     final segments = <({int offset, int length, int address})>[];
@@ -86,7 +86,7 @@ class ImageMetadata {
     );
   }
 
-  static ImageMetadata? fromBytesOrNull(Uint8List buffer, { bool appRequired = false }) {
+  static ImageMetadata? fromBytesOrNull(Uint8List buffer, {bool appRequired = false}) {
     try {
       return ImageMetadata.fromBytes(buffer, appRequired: appRequired);
     } catch (e) {
@@ -97,7 +97,7 @@ class ImageMetadata {
   Map<String, dynamic> toJson() => _$ImageMetadataToJson(this);
 
   @override
-  String toString() => "$runtimeType${toJson()}";
+  String toString() => "${(ImageMetadata)}${toJson()}";
 
   final ImageHeader header;
   final List<({int offset, int length, int address})> segments;
@@ -181,7 +181,7 @@ class ImageHeader {
   Map<String, dynamic> toJson() => _$ImageHeaderToJson(this);
 
   @override
-  String toString() => "$runtimeType${toJson()}";
+  String toString() => "${(ImageHeader)}${toJson()}";
 
   final int segmentCount;
   final ImageSpiMode? spiMode;
