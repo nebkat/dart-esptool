@@ -35,7 +35,7 @@ class ImageMetadata {
       final segment = (
         offset: offset,
         length: segmentHeaderView.getUint32(4, Endian.little),
-        address: segmentHeaderView.getUint32(4, Endian.little),
+        address: segmentHeaderView.getUint32(0, Endian.little),
       );
 
       final data = Uint8List.sublistView(buffer, offset, offset + segment.length);
