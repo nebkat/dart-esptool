@@ -12,5 +12,6 @@ Map<String, dynamic> _$AppDescriptionToJson(AppDescription instance) =>
       'version': instance.version,
       'idfVersion': instance.idfVersion,
       'secureVersion': instance.secureVersion,
-      if (instance.compiled case final value?) 'compiled': value,
+      'date': instance.date,
+      'time': instance.time,
     };

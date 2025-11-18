@@ -26,6 +26,9 @@ void main() {
       expect(image.appDescription!.projectName, 'hello_world');
       expect(image.appDescription!.version, 'v5.3.1-10-ga97660f327');
       expect(image.appDescription!.idfVersion, 'v5.3.1-10-ga97660f327');
+      expect(image.appDescription!.time, '16:58:41');
+      expect(image.appDescription!.date, 'Nov  3 2024');
+      expect(image.appDescription!.dateTime, DateTime(2024, 11, 3, 16, 58, 41));
       expect(image.appDescription!.secureVersion, 0);
     });
   });

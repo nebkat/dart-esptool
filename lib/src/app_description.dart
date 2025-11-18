@@ -22,7 +22,8 @@ class AppDescription {
     required this.version,
     required this.idfVersion,
     required this.secureVersion,
-    required this.compiled,
+    this.date = "",
+    this.time = "",
     required this.elfSha256,
   });
 
@@ -37,15 +38,13 @@ class AppDescription {
       throw FormatException("Invalid firmware file, magic not found");
     }
 
-    final time = String.fromCharCodes(buffer.sublist(80, 80 + 16).takeWhile((v) => v != 0));
-    final date = String.fromCharCodes(buffer.sublist(96, 96 + 16).takeWhile((v) => v != 0));
-
     return AppDescription(
       projectName: String.fromCharCodes(buffer.sublist(48, 48 + 32).takeWhile((v) => v != 0)),
       version: String.fromCharCodes(buffer.sublist(16, 16 + 32).takeWhile((v) => v != 0)),
       idfVersion: String.fromCharCodes(buffer.sublist(112, 112 + 32).takeWhile((v) => v != 0)),
       secureVersion: view.getUint32(4, Endian.little),
-      compiled: date.isNotEmpty && time.isNotEmpty ? "$date $time" : null,
+      date: String.fromCharCodes(buffer.sublist(96, 96 + 16).takeWhile((v) => v != 0)),
+      time: String.fromCharCodes(buffer.sublist(80, 80 + 16).takeWhile((v) => v != 0)),
       elfSha256: buffer.sublist(144, 144 + 32),
     );
   }
@@ -62,9 +61,50 @@ class AppDescription {
   final String version;
   final String idfVersion;
   final int secureVersion;
-  final String? compiled;
+  final String date;
+  final String time;
   @JsonKey(includeToJson: false)
   final Uint8List elfSha256;
+
+  @JsonKey(includeToJson: false)
+  DateTime get dateTime {
+    final month = switch (date.substring(0, 3)) {
+      "Jan" => 1,
+      "Feb" => 2,
+      "Mar" => 3,
+      "Apr" => 4,
+      "May" => 5,
+      "Jun" => 6,
+      "Jul" => 7,
+      "Aug" => 8,
+      "Sep" => 9,
+      "Oct" => 10,
+      "Nov" => 11,
+      "Dec" => 12,
+      _ => throw FormatException("Invalid month in date: '$date'"),
+    };
+    final day = int.parse(date.substring(4, 6).trim());
+    final year = int.parse(date.substring(7, 11).trim());
+    final hour = int.parse(time.substring(0, 2).trim());
+    final minute = int.parse(time.substring(3, 5).trim());
+    final second = int.parse(time.substring(6, 8).trim());
+    return DateTime(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+    );
+  }
+
+  DateTime? get dateTimeOrNull {
+    try {
+      return dateTime;
+    } catch (e) {
+      return null;
+    }
+  }
 
   String get _versionWithoutV => version.startsWith("v") ? version.substring(1) : version;
 
