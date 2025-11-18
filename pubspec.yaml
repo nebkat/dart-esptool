@@ -1,6 +1,6 @@
 name: esptool
 description: Tools for Espressif chips.
-version: 0.0.1
+version: 0.2.0
 repository: https://github.com/nebkat/dart-esptool
 publish_to: 'none' # DO NOT REMOVE (PRIVATE PACKAGE)
 
