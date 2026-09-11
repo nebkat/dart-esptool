@@ -13,7 +13,7 @@ class HexField extends StatelessWidget {
       width: width,
       child: TextField(
         controller: controller,
-        style: const TextStyle(fontFamily: 'monospace'),
+        style: const TextStyle(fontFamily: 'RobotoMono'),
         decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
       ),
     );

@@ -53,7 +53,7 @@ class _ChipCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Row(children: [
                   SizedBox(width: 80, child: Text(k, style: Theme.of(context).textTheme.labelLarge)),
-                  SelectableText(v, style: const TextStyle(fontFamily: 'monospace')),
+                  SelectableText(v, style: const TextStyle(fontFamily: 'RobotoMono')),
                 ]),
               ),
           ],

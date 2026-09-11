@@ -67,7 +67,7 @@ class _LogPanelState extends State<LogPanel> {
                     return Text(
                       '$stamp  ${line.message}',
                       style: TextStyle(
-                        fontFamily: 'monospace',
+                        fontFamily: 'RobotoMono',
                         fontSize: 12,
                         color: line.error ? theme.colorScheme.error : null,
                       ),

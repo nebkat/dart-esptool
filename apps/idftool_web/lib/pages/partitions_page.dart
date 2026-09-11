@@ -7,6 +7,7 @@ import 'package:idftool/idftool.dart';
 import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/type_chip.dart';
 
 /// The device's partition table, with per-partition read/write/erase and
 /// table export/replace.
@@ -194,6 +195,8 @@ class _PartitionsPageState extends State<PartitionsPage> {
             scrollDirection: Axis.horizontal,
             child: DataTable(
               columnSpacing: 20,
+              dataTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
+              headingTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontWeight: FontWeight.bold, fontSize: 13),
               columns: const [
                 DataColumn(label: Text('Name')),
                 DataColumn(label: Text('Type')),
@@ -208,14 +211,14 @@ class _PartitionsPageState extends State<PartitionsPage> {
                 for (final p in table)
                   DataRow(cells: [
                     DataCell(Row(children: [
-                      Text(p.name, style: const TextStyle(fontFamily: 'monospace')),
+                      Text(p.name),
                       if (p.isOtaApp && activeSlot == p.subtype - AppSubtype.otaMin)
                         const Padding(padding: EdgeInsets.only(left: 6), child: Icon(Icons.play_arrow, size: 16, color: Colors.green)),
                     ])),
-                    DataCell(_TypeChip(p.typeName, _typeColor(p, context))),
-                    DataCell(_TypeChip(p.subtypeName, _typeColor(p, context), outlined: true)),
-                    DataCell(Text(p.offset.hex, style: const TextStyle(fontFamily: 'monospace'))),
-                    DataCell(Text('${p.size.hex} (${p.size.bytesString})', style: const TextStyle(fontFamily: 'monospace'))),
+                    DataCell(TypeChip(p.typeName, _typeColor(p.type))),
+                    DataCell(TypeChip(p.subtypeName, _subtypeColor(p))),
+                    DataCell(Text(p.offset.hex)),
+                    DataCell(Text('${p.size.hex} (${p.size.bytesString})')),
                     DataCell(Text(p.flagNames.join(', '))),
                     DataCell(Text(_apps[p.name] == null ? '' : '${_apps[p.name]!.projectName} ${_apps[p.name]!.version}')),
                     DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
@@ -234,45 +237,29 @@ class _PartitionsPageState extends State<PartitionsPage> {
   }
 }
 
-/// One hue per partition type so the table scans by kind: bootloader and
-/// partition-table rows in the chip's own colours, apps and the data
-/// subtypes people care about (nvs, otadata, filesystems) each distinct.
-Color _typeColor(PartitionDefinition p, BuildContext context) {
-  final scheme = Theme.of(context).colorScheme;
-  return switch (p.knownType) {
-    PartitionType.bootloader => Colors.deepOrange,
-    PartitionType.partitionTable => Colors.brown,
-    PartitionType.app => p.subtype == AppSubtype.factory.value ? Colors.teal : Colors.green,
-    PartitionType.data => switch (p.subtype) {
-        _ when p.subtype == DataSubtype.nvs.value => Colors.blue,
-        _ when p.subtype == DataSubtype.ota.value => Colors.lightGreen,
-        _ when p.subtype == DataSubtype.phy.value => Colors.blueGrey,
-        _ when p.subtype == DataSubtype.coredump.value => Colors.red,
-        _ when p.subtype == DataSubtype.spiffs.value || p.subtype == DataSubtype.littlefs.value || p.subtype == DataSubtype.fat.value => Colors.purple,
-        _ => Colors.indigo,
-      },
-    null => scheme.outline,
-  };
-}
+/// One hue per partition type, so the table scans by kind; each subtype
+/// sits at its own point in a narrow band around that hue (ordered by the
+/// subtype's position among its type's known subtypes), so kinds stay
+/// grouped while subtypes remain distinguishable.
+double _typeHue(int type) => switch (PartitionType.fromValue(type)) {
+      PartitionType.bootloader => 20, // orange
+      PartitionType.partitionTable => 45, // amber
+      PartitionType.app => 140, // green
+      PartitionType.data => 215, // blue
+      null => 0,
+    };
 
-class _TypeChip extends StatelessWidget {
-  const _TypeChip(this.label, this.color, {this.outlined = false});
-  final String label;
-  final Color color;
-  final bool outlined;
+Color _typeColor(int type) => PartitionType.fromValue(type) == null
+    ? Colors.grey
+    : HSLColor.fromAHSL(1, _typeHue(type), 0.6, 0.45).toColor();
 
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final fill = outlined ? Colors.transparent : color.withValues(alpha: dark ? 0.35 : 0.18);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: fill,
-        border: Border.all(color: color.withValues(alpha: 0.7)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(label, style: TextStyle(fontSize: 12, color: dark ? Color.lerp(color, Colors.white, 0.4) : Color.lerp(color, Colors.black, 0.3))),
-    );
-  }
+Color _subtypeColor(PartitionDefinition p) {
+  if (p.knownType == null) return Colors.grey;
+  final known = subtypeKeywords(p.type).values.toList()..sort();
+  final index = known.indexOf(p.subtype);
+  if (index < 0) return _typeColor(p.type);
+  // Spread the known subtypes over ±25° of hue and a little lightness, so
+  // neighbours differ but never leave the type's colour family.
+  final t = known.length == 1 ? 0.5 : index / (known.length - 1);
+  return HSLColor.fromAHSL(1, (_typeHue(p.type) - 25 + 50 * t) % 360, 0.55, 0.38 + 0.2 * t).toColor();
 }

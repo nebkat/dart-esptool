@@ -6,6 +6,7 @@ import 'package:idftool/idftool.dart';
 import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/type_chip.dart';
 
 /// Browse and edit an NVS partition: entries grouped by namespace, pending
 /// edits applied in one write of only the pages that changed.
@@ -189,48 +190,51 @@ class _NvsPageState extends State<NvsPage> {
           if (_edits.isNotEmpty) TextButton(onPressed: () => setState(_edits.clear), child: const Text('Discard')),
         ]),
         const SizedBox(height: 8),
-        for (final namespace in _namespaces(image, pending)) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 4),
-            child: Row(children: [
-              Text(namespace, style: theme.textTheme.titleMedium?.copyWith(fontFamily: 'monospace')),
-              IconButton(tooltip: 'Add entry in $namespace', icon: const Icon(Icons.add, size: 18), onPressed: busy ? null : () => _editEntry(namespace: namespace)),
-            ]),
-          ),
-          Card(
+        // One table for every namespace so columns line up; it fills the
+        // width and the value column takes whatever is left.
+        LayoutBuilder(
+          builder: (context, constraints) => Card(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columnSpacing: 20,
-                columns: const [
-                  DataColumn(label: Text('Key')),
-                  DataColumn(label: Text('Type')),
-                  DataColumn(label: Text('Value')),
-                  DataColumn(label: Text('')),
-                ],
-                rows: [
-                  for (final entry in image.entries.where((e) => e.namespace == namespace))
-                    _row(entry: entry, pending: pending['${entry.namespace}:${entry.key}'], busy: busy),
-                  for (final edit in _edits.where((e) => e.namespace == namespace && !e.isDelete && image.get(e.namespace, e.key) == null))
-                    _row(pending: edit, busy: busy),
-                ],
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: DataTable(
+                  columnSpacing: 20,
+                  dataTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
+                  headingTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontWeight: FontWeight.bold, fontSize: 13),
+                  columns: const [
+                    DataColumn(label: Text('Namespace')),
+                    DataColumn(label: Text('Key')),
+                    DataColumn(label: Text('Type')),
+                    DataColumn(label: Expanded(child: Text('Value'))),
+                    DataColumn(label: Text('')),
+                  ],
+                  rows: [
+                    for (final entry in _sortedEntries(image))
+                      _row(entry: entry, pending: pending['${entry.namespace}:${entry.key}'], busy: busy),
+                    for (final edit in _edits.where((e) => !e.isDelete && image.get(e.namespace, e.key) == null))
+                      _row(pending: edit, busy: busy),
+                  ],
+                ),
               ),
             ),
           ),
-        ],
+        ),
       ],
     ]);
   }
 
-  Iterable<String> _namespaces(NvsImage image, Map<String, NvsEdit> pending) {
-    final names = <String>[];
+  /// Entries in namespace order of first appearance, keys sorted within.
+  List<NvsEntry> _sortedEntries(NvsImage image) {
+    final order = <String>[];
     for (final e in image.entries) {
-      if (!names.contains(e.namespace)) names.add(e.namespace);
+      if (!order.contains(e.namespace)) order.add(e.namespace);
     }
-    for (final e in _edits) {
-      if (!names.contains(e.namespace)) names.add(e.namespace);
-    }
-    return names;
+    return List.of(image.entries)
+      ..sort((a, b) {
+        final ns = order.indexOf(a.namespace).compareTo(order.indexOf(b.namespace));
+        return ns != 0 ? ns : a.key.compareTo(b.key);
+      });
   }
 
   DataRow _row({NvsEntry? entry, NvsEdit? pending, required bool busy}) {
@@ -241,20 +245,19 @@ class _NvsPageState extends State<NvsPage> {
     final type = changed ? pending.type : entry?.type;
     final valueText = changed ? formatNvsValue(pending.value!) : entry?.valueText ?? '';
     final style = TextStyle(
-      fontFamily: 'monospace',
+      fontFamily: 'RobotoMono',
       decoration: deleted ? TextDecoration.lineThrough : null,
       color: deleted ? theme.disabledColor : (changed ? theme.colorScheme.primary : null),
       fontWeight: changed ? FontWeight.bold : null,
     );
+    final namespace = entry?.namespace ?? pending!.namespace;
     return DataRow(
       color: changed || deleted ? WidgetStatePropertyAll(theme.colorScheme.primaryContainer.withValues(alpha: 0.25)) : null,
       cells: [
+        DataCell(TypeChip(namespace, colorForName(namespace))),
         DataCell(Text(key, style: style)),
-        DataCell(Text(type?.label ?? '', style: style)),
-        DataCell(ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: Text(valueText, style: style, overflow: TextOverflow.ellipsis, maxLines: 1),
-        )),
+        DataCell(type == null ? const SizedBox.shrink() : TypeChip(type.label, _nvsTypeColor(type))),
+        DataCell(Text(valueText, style: style, overflow: TextOverflow.ellipsis, maxLines: 1)),
         DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
             tooltip: 'Edit',
@@ -331,7 +334,7 @@ class _EntryDialogState extends State<_EntryDialog> {
                 controller: _namespace,
                 enabled: !editing,
                 decoration: const InputDecoration(labelText: 'Namespace', border: OutlineInputBorder(), isDense: true),
-                style: const TextStyle(fontFamily: 'monospace'),
+                style: const TextStyle(fontFamily: 'RobotoMono'),
               ),
             ),
             const SizedBox(width: 8),
@@ -340,7 +343,7 @@ class _EntryDialogState extends State<_EntryDialog> {
                 controller: _key,
                 enabled: !editing,
                 decoration: const InputDecoration(labelText: 'Key', border: OutlineInputBorder(), isDense: true),
-                style: const TextStyle(fontFamily: 'monospace'),
+                style: const TextStyle(fontFamily: 'RobotoMono'),
               ),
             ),
             const SizedBox(width: 8),
@@ -359,7 +362,7 @@ class _EntryDialogState extends State<_EntryDialog> {
               border: const OutlineInputBorder(),
               errorText: _error,
             ),
-            style: const TextStyle(fontFamily: 'monospace'),
+            style: const TextStyle(fontFamily: 'RobotoMono'),
             onSubmitted: (_) => _submit(),
           ),
         ]),
@@ -371,3 +374,10 @@ class _EntryDialogState extends State<_EntryDialog> {
     );
   }
 }
+
+/// Integers share a blue band (wider = deeper), strings green, blobs purple.
+Color _nvsTypeColor(NvsType type) => switch (type) {
+      NvsType.string => HSLColor.fromAHSL(1, 140, 0.55, 0.42).toColor(),
+      NvsType.blob => HSLColor.fromAHSL(1, 280, 0.5, 0.5).toColor(),
+      _ => HSLColor.fromAHSL(1, 205 + (type.signed ? 12 : 0), 0.6, 0.62 - 0.07 * (type.width! ~/ 2)).toColor(),
+    };

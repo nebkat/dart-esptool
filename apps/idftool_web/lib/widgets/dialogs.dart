@@ -27,7 +27,7 @@ Future<void> showText(BuildContext context, {required String title, required Str
         title: Text(title),
         content: SizedBox(
           width: 800,
-          child: SingleChildScrollView(child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 12))),
+          child: SingleChildScrollView(child: SelectableText(text, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 12))),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
       ),

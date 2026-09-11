@@ -141,7 +141,7 @@ class _FirmwarePageState extends State<FirmwarePage> {
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(children: [
                     SizedBox(width: 90, child: Text(k, style: theme.textTheme.labelLarge)),
-                    Flexible(child: SelectableText(v, style: const TextStyle(fontFamily: 'monospace'))),
+                    Flexible(child: SelectableText(v, style: const TextStyle(fontFamily: 'RobotoMono'))),
                   ]),
                 ),
             ],
@@ -166,10 +166,15 @@ class _FirmwarePageState extends State<FirmwarePage> {
                   icon: const Icon(Icons.download),
                   label: Text('Dump full flash (${session.flashSize?.bytesString ?? '?'})')),
               OutlinedButton.icon(onPressed: busy ? null : _writeImage, icon: const Icon(Icons.upload), label: const Text('Write image…')),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Checkbox(value: _eraseBeforeImage, onChanged: (v) => setState(() => _eraseBeforeImage = v!)),
-                const Text('Erase whole flash before writing image'),
-              ]),
+              Tooltip(
+                message: 'On: erase the entire chip first, so flash beyond the image (and anything it does not cover) is wiped '
+                    'and the result is reproducible.\nOff: write only the image\'s span — with the differential strategy only the sectors that differ — '
+                    'leaving the rest of flash (e.g. logs, data partitions past the image) untouched.',
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Checkbox(value: _eraseBeforeImage, onChanged: (v) => setState(() => _eraseBeforeImage = v!)),
+                  const Text('Erase entire chip first (wipe everything the image doesn\'t cover)'),
+                ]),
+              ),
             ]),
           ]),
         ),
