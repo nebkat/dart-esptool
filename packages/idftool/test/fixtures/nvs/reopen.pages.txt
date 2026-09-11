@@ -1,0 +1,12 @@
+| Page | Seq | State         | Used  | Entries             |
+|------|-----|---------------|-------|---------------------|
+| 0    | 0   | active        | 5/126 | 5 written, 0 erased |
+| 1    | -   | uninitialised |       |                     |
+| 2    | -   | uninitialised |       |                     |
+
+| Namespace | Key     | Type | Value |
+|-----------|---------|------|-------|
+| first     | a       | u8   | 1     |
+| second    | b       | u8   | 2     |
+| second    | late_u8 | u8   | 3     |
+3 entries in 2 namespaces, 3 bytes of data

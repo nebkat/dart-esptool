@@ -1,0 +1,4 @@
+  + nums:new_u8 (u8) = 200
+  + other:hello (string) = world
+  + bin:more (blob) = 0102030405
+Appended in place; 1 of 6 page changed (0).

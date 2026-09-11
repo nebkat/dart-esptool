@@ -1,0 +1,7 @@
+key,type,encoding,value
+first,namespace,,
+a,data,u8,1
+second,namespace,,
+b,data,u8,2
+first,namespace,,
+late_u8,data,u8,3

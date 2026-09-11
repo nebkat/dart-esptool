@@ -1,0 +1,32 @@
+| Page | Seq | State         | Used   | Entries              |
+|------|-----|---------------|--------|----------------------|
+| 0    | 0   | active        | 58/126 | 58 written, 0 erased |
+| 1    | -   | uninitialised |        |                      |
+| 2    | -   | uninitialised |        |                      |
+| 3    | -   | uninitialised |        |                      |
+| 4    | -   | uninitialised |        |                      |
+| 5    | -   | uninitialised |        |                      |
+
+| Namespace | Key     | Type   | Value                                                         |
+|-----------|---------|--------|---------------------------------------------------------------|
+| bin       | b64     | blob   | 68656c6c6f20776f726c64                                        |
+| bin       | big     | blob   | 020910171e252c333a41484f565d646b727980878e959ca3… (500 bytes) |
+| bin       | empty   | blob   |                                                               |
+| bin       | exact32 | blob   | 01080f161d242b323940474e555c636a71787f868d949ba2… (32 bytes)  |
+| bin       | hex     | blob   | deadbeef00ff                                                  |
+| nums      | i16_v   | i16    | -2                                                            |
+| nums      | i32_v   | i32    | -2147483648                                                   |
+| nums      | i64_min | i64    | -9223372036854775808                                          |
+| nums      | i64_pos | i64    | 1234567890123                                                 |
+| nums      | i8_min  | i8     | -128                                                          |
+| nums      | u16_v   | u16    | 65535                                                         |
+| nums      | u32_v   | u32    | 4294967295                                                    |
+| nums      | u64_max | u64    | 18446744073709551615                                          |
+| nums      | u8_max  | u8     | 2                                                             |
+| text      | empty   | string |                                                               |
+| text      | exact31 | string | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                               |
+| text      | exact32 | string | bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb                              |
+| text      | long    | string | The quick brown fox jumps over the lazy dog. The…             |
+| text      | utf8    | string | héllo wörld ✓                                                 |
+| zzz       | k       | u32    | 1                                                             |
+20 entries in 4 namespaces, 811 bytes of data

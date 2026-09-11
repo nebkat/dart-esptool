@@ -1,0 +1,15 @@
+| Page | Seq | State         | Used  | Entries             |
+|------|-----|---------------|-------|---------------------|
+| 0    | 0   | active        | 5/126 | 5 written, 0 erased |
+| 1    | -   | uninitialised |       |                     |
+| 2    | -   | uninitialised |       |                     |
+| 3    | -   | uninitialised |       |                     |
+| 4    | -   | uninitialised |       |                     |
+| 5    | -   | uninitialised |       |                     |
+
+| Namespace | Key         | Type   | Value        |
+|-----------|-------------|--------|--------------|
+| storage   | counter     | u16    | 7            |
+| storage   | device_id   | u32    | 12345        |
+| storage   | device_name | string | idftool-test |
+3 entries in 1 namespace, 19 bytes of data

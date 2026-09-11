@@ -1,0 +1,35 @@
+╭─ Traceback (most recent call last) ──────────────────────────────────────────╮
+│ in apply:324  (idftool/nvs/edit.py)                                          │
+│ in _append:384  (idftool/nvs/edit.py)                                        │
+│ in write_item:219  (idftool/nvs/edit.py)                                     │
+│ in page_with_room:183  (idftool/nvs/edit.py)                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+NoSpaceError: no free pages left to append to
+
+During handling of the above exception, another exception occurred:
+
+╭─ Traceback (most recent call last) ──────────────────────────────────────────╮
+│ in write_entry:656  (esp_idf_nvs_partition_gen/nvs_partition_gen.py)         │
+│ in write_primitive_data:418  (esp_idf_nvs_partition_gen/nvs_partition_gen.p… │
+╰──────────────────────────────────────────────────────────────────────────────╯
+PageFullError: 
+
+During handling of the above exception, another exception occurred:
+
+╭─ Traceback (most recent call last) ──────────────────────────────────────────╮
+│ in _main:20  (idftool/__main__.py)                                           │
+│ in main:216  (rich_click/rich_command.py)                                    │
+│ in invoke:1912  (click/core.py)                                              │
+│ in invoke:1308  (click/core.py)                                              │
+│ in invoke:877  (click/core.py)                                               │
+│ in new_func:93  (click/decorators.py)                                        │
+│ in invoke:877  (click/core.py)                                               │
+│ in cmd_set_nvs:454  (idftool/commands/nvs.py)                                │
+│ in set_nvs:391  (idftool/commands/nvs.py)                                    │
+│ in apply:326  (idftool/nvs/edit.py)                                          │
+│ in compact:317  (idftool/nvs/edit.py)                                        │
+│ in rewrite:457  (idftool/nvs/edit.py)                                        │
+│ in write_entry:658  (esp_idf_nvs_partition_gen/nvs_partition_gen.py)         │
+│ in create_new_page:529  (esp_idf_nvs_partition_gen/nvs_partition_gen.py)     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+InsufficientSizeError: Error: Size parameter is less than the size of data in csv. Please increase the size.

@@ -1,0 +1,5 @@
+  - nums:u8_max (u8) deleted
+  - text:long (string) deleted
+  - bin:big (blob) deleted
+  = nums:missing unchanged
+Appended in place; 1 of 6 page changed (0).

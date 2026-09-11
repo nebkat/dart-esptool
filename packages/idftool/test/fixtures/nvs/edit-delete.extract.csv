@@ -1,0 +1,21 @@
+key,type,encoding,value
+nums,namespace,,
+i16_v,data,i16,-2
+i32_v,data,i32,-2147483648
+i64_min,data,i64,-9223372036854775808
+i64_pos,data,i64,1234567890123
+i8_min,data,i8,-128
+u16_v,data,u16,65535
+u32_v,data,u32,4294967295
+u64_max,data,u64,18446744073709551615
+text,namespace,,
+empty,data,string,
+exact31,data,string,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+exact32,data,string,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+short,data,string,hi
+utf8,data,string,héllo wörld ✓
+bin,namespace,,
+b64,data,hex2bin,68656c6c6f20776f726c64
+empty,data,hex2bin,
+exact32,data,hex2bin,01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3da
+hex,data,hex2bin,deadbeef00ff

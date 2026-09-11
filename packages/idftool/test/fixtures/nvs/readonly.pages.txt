@@ -1,0 +1,8 @@
+| Page | Seq | State  | Used  | Entries             |
+|------|-----|--------|-------|---------------------|
+| 0    | 0   | active | 2/126 | 2 written, 0 erased |
+
+| Namespace | Key | Type | Value |
+|-----------|-----|------|-------|
+| ro        | a   | u8   | 1     |
+1 entry in 1 namespace, 1 bytes of data

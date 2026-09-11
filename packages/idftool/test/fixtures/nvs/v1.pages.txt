@@ -1,0 +1,14 @@
+| Page | Seq | State         | Used   | Entries              |
+|------|-----|---------------|--------|----------------------|
+| 0    | 0   | active        | 48/126 | 48 written, 0 erased |
+| 1    | -   | uninitialised |        |                      |
+| 2    | -   | uninitialised |        |                      |
+| 3    | -   | uninitialised |        |                      |
+
+| Namespace | Key     | Type   | Value                                                          |
+|-----------|---------|--------|----------------------------------------------------------------|
+| v1        | bigblob | blob   | 414243414243414243414243414243414243414243414243… (1200 bytes) |
+| v1        | blob    | blob   | 080f161d242b323940474e555c636a71787f868d949ba2a9… (100 bytes)  |
+| v1        | num     | i32    | -5                                                             |
+| v1        | str     | string | version one                                                    |
+4 entries in 1 namespace, 1316 bytes of data

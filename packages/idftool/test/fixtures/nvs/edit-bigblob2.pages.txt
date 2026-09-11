@@ -1,0 +1,17 @@
+| Page | Seq | State         | Used    | Entries               |
+|------|-----|---------------|---------|-----------------------|
+| 0    | 0   | full          | 126/126 | 1 written, 125 erased |
+| 1    | 1   | full          | 66/126  | 0 written, 66 erased  |
+| 2    | 2   | full          | 126/126 | 125 written, 1 erased |
+| 3    | 3   | full          | 126/126 | 0 written, 126 erased |
+| 4    | 4   | full          | 126/126 | 1 written, 125 erased |
+| 5    | 5   | full          | 126/126 | 73 written, 53 erased |
+| 6    | 6   | active        | 59/126  | 59 written, 0 erased  |
+| 7    | -   | uninitialised |         |                       |
+
+| Namespace | Key    | Type   | Value                                                          |
+|-----------|--------|--------|----------------------------------------------------------------|
+| blobs     | first  | blob   | 070e151c232a31383f464d545b626970777e858c939aa1a8… (4100 bytes) |
+| blobs     | maxstr | string | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…              |
+| blobs     | tail   | u8     | 9                                                              |
+3 entries in 1 namespace, 8069 bytes of data

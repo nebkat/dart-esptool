@@ -1,0 +1,5 @@
+  ~ nums:u8_max (u8): 255 -> 1
+  ~ text:long (string): The quick brown fox jumps over the lazy dog. The… -> changed
+  ~ bin:big (blob): 020910171e252c333a41484f565d646b727980878e959ca3… -> 050c131a21282f363d444b525960676e757c838a91989fa6…
+  = nums:i64_pos unchanged
+Appended in place; 1 of 6 page changed (0).

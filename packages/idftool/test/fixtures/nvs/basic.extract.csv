@@ -1,0 +1,5 @@
+key,type,encoding,value
+storage,namespace,,
+counter,data,u16,7
+device_id,data,u32,12345
+device_name,data,string,idftool-test
