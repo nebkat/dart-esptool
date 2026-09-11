@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>esptool · Web Serial</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; margin: 1.5rem; max-width: 64rem; }
+    fieldset { margin-bottom: .75rem; display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+    input.addr { width: 6.5rem; font-family: ui-monospace, monospace; }
+    progress { width: 100%; }
+    #support { color: #b00; }
+    #log { background: #111; color: #ddd; padding: .75rem; height: 30rem; overflow: auto;
+           font: 12px ui-monospace, monospace; white-space: pre-wrap; margin: 0; }
+  </style>
+  <script defer src="main.dart.js"></script>
+</head>
+<body>
+  <h1>esptool · Web Serial</h1>
+  <p id="support"></p>
+
+  <fieldset>
+    <legend>Port</legend>
+    <button id="add-port">Add port…</button>
+    <select id="port"></select>
+    <label>Reset
+      <select id="reset">
+        <option value="auto">auto</option>
+        <option value="usb-jtag">usb-jtag</option>
+        <option value="classic">classic</option>
+        <option value="none">none (already in download mode)</option>
+      </select>
+    </label>
+    <label>Baud
+      <select id="baud"><option>115200</option><option>460800</option><option>921600</option></select>
+    </label>
+    <label><input type="checkbox" id="stub" checked> Use flasher stub</label>
+    <label><input type="checkbox" id="reset-after" checked> Hard reset after</label>
+    <label><input type="checkbox" id="trace" checked> Trace line/port ops</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Commands</legend>
+    <button id="info">Info</button>
+    <span>Read <input class="addr" id="read-addr" value="0x0"> len <input class="addr" id="read-len" value="0x1000">
+      <button id="read">Read &amp; download</button></span>
+    <span>Write <input type="file" id="write-file"> at <input class="addr" id="write-addr" placeholder="0x10000">
+      <button id="write">Write</button></span>
+    <span>Erase <input class="addr" id="erase-addr" placeholder="addr"> len <input class="addr" id="erase-len" placeholder="len">
+      <button id="erase">Erase</button></span>
+    <button id="hard-reset">Hard reset only</button>
+    <button id="clear">Clear log</button>
+  </fieldset>
+
+  <progress id="progress" value="0" max="1"></progress>
+  <pre id="log"></pre>
+</body>
+</html>
