@@ -9,4 +9,7 @@ workspace:
   - packages/esptool
   - packages/esptool_libserialport
   - packages/idftool
+  - packages/littlefs
+  - packages/spiffs
+  - packages/fatfs
   - apps/idftool_web
