@@ -1,12 +1,11 @@
 import 'package:esptool/esptool.dart';
-import 'package:esptool/web.dart';
 import 'package:flutter/material.dart';
 
 import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/hex_field.dart';
 
-/// Connection controls, chip facts, and raw flash operations by address.
+/// Chip facts and raw flash operations by address.
 class DevicePage extends StatelessWidget {
   const DevicePage({super.key, required this.session});
   final DeviceSession session;
@@ -16,95 +15,14 @@ class DevicePage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _ConnectionCard(session: session),
-        const SizedBox(height: 16),
-        if (session.connected) ...[
+        if (!session.connected)
+          const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('Connect to a device using the bar above.')))
+        else ...[
           _ChipCard(session: session),
           const SizedBox(height: 16),
           _RawFlashCard(session: session),
         ],
       ],
-    );
-  }
-}
-
-class _ConnectionCard extends StatelessWidget {
-  const _ConnectionCard({required this.session});
-  final DeviceSession session;
-
-  @override
-  Widget build(BuildContext context) {
-    final locked = session.connected || session.busy;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Connection', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 320,
-                  child: DropdownButtonFormField<SerialPort>(
-                    key: ValueKey(session.selectedPort),
-                    initialValue: session.selectedPort,
-                    decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder(), isDense: true),
-                    items: [
-                      for (final p in session.ports)
-                        DropdownMenuItem(value: p, child: Text(DeviceSession.describePort(p), overflow: TextOverflow.ellipsis)),
-                    ],
-                    onChanged: locked ? null : session.selectPort,
-                    hint: const Text('No port granted'),
-                  ),
-                ),
-                OutlinedButton.icon(
-                  onPressed: locked ? null : session.requestPort,
-                  icon: const Icon(Icons.usb),
-                  label: const Text('Add port…'),
-                ),
-                SizedBox(
-                  width: 260,
-                  child: DropdownButtonFormField<ResetChoice>(
-                    key: ValueKey(session.reset),
-                    initialValue: session.reset,
-                    decoration: const InputDecoration(labelText: 'Reset', border: OutlineInputBorder(), isDense: true),
-                    items: [for (final r in ResetChoice.values) DropdownMenuItem(value: r, child: Text(r.label))],
-                    onChanged: locked ? null : (v) => session.setReset(v!),
-                  ),
-                ),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Checkbox(value: session.useStub, onChanged: locked ? null : (v) => session.setUseStub(v!)),
-                  const Text('Flasher stub'),
-                ]),
-                if (!session.connected)
-                  FilledButton.icon(
-                    onPressed: session.busy || session.selectedPort == null ? null : session.connect,
-                    icon: session.busy
-                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.link),
-                    label: Text(session.busy ? 'Connecting…' : 'Connect'),
-                  )
-                else ...[
-                  FilledButton.tonalIcon(
-                    onPressed: session.busy ? null : () => session.disconnect(hardReset: true),
-                    icon: const Icon(Icons.restart_alt),
-                    label: const Text('Reset & disconnect'),
-                  ),
-                  TextButton(
-                    onPressed: session.busy ? null : () => session.disconnect(hardReset: false),
-                    child: const Text('Disconnect'),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

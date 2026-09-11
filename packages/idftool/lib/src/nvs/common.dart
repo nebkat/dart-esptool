@@ -290,10 +290,9 @@ class NvsPage {
 
 /// One logical key/value pair, with its blob chunks already stitched together.
 ///
-/// [value] is an `int` for a primitive, a `String` for a string, and a
-/// `Uint8List` for a blob. 64-bit primitives are held as a Dart `int`, so a
-/// `u64` above `2^63 - 1` shows up negative — use [valueText] (or
-/// [formatNvsValue]) to render it unsigned.
+/// [value] is an `int` for a primitive up to 32 bits, a `BigInt` for `u64` /
+/// `i64` (a JavaScript `int` cannot hold them), a `String` for a string, and
+/// a `Uint8List` for a blob.
 class NvsEntry {
   NvsEntry({
     required this.namespace,
@@ -323,8 +322,8 @@ class NvsEntry {
 
   String get qualified => '$namespace:$key';
 
-  /// The value as text: hex for a blob, unsigned decimal for a `u64`.
-  String get valueText => formatNvsValue(value, type: type);
+  /// The value as text: hex for a blob, decimal for a number.
+  String get valueText => formatNvsValue(value);
 
   /// Render the value for a listing, abbreviating anything long.
   String formatValue({int limit = 48}) {
@@ -370,14 +369,31 @@ class NvsImage {
   int? namespaceIndex(String namespace) => namespaces.entries.firstWhereOrNull((e) => e.value == namespace)?.key;
 }
 
-/// Render a value as text: hex for bytes, unsigned decimal for a `u64` (whose
-/// Dart `int` representation wraps negative above `2^63 - 1`), `toString`
-/// otherwise.
-String formatNvsValue(Object value, {NvsType? type}) {
-  if (value is Uint8List) return hexEncode(value);
-  if (value is int && type == NvsType.u64) return BigInt.from(value).toUnsigned(64).toString();
-  return value.toString();
+/// Render a value as text: hex for bytes, `toString` otherwise (a `BigInt`
+/// prints as plain decimal).
+String formatNvsValue(Object value) => value is Uint8List ? hexEncode(value) : value.toString();
+
+/// Coerce a number to the representation an entry of [type] holds: `BigInt`
+/// for the 64-bit types, `int` otherwise. Anything else is returned as is.
+Object normalizeNvsValue(NvsType type, Object value) {
+  if (type.width == 8 && value is int) return BigInt.from(value);
+  if (type.width != null && type.width! < 8 && value is BigInt && value.isValidInt) return value.toInt();
+  return value;
 }
+
+/// Whether two entry values are equal, comparing blobs by content.
+bool valuesEqual(Object? a, Object? b) {
+  if (a is List<int> && b is List<int>) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+  return a == b;
+}
+
+final BigInt _mask32 = BigInt.from(0xFFFFFFFF);
 
 String hexEncode(List<int> bytes) => bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
@@ -395,48 +411,69 @@ Uint8List hexDecode(String text) {
 
 /// Pack a primitive into the 8-byte data field, padded with erased flash.
 ///
-/// Throws [NvsError] if [value] is out of range. 64-bit values are taken as
-/// their two's-complement bit pattern, so a `u64` above `2^63 - 1` is passed
-/// as the (negative) `int` with the same bits.
-Uint8List packPrimitive(NvsType type, int value) {
+/// [value] is an `int` for the types up to 32 bits and a `BigInt` (or an
+/// `int`, converted) for `u64` / `i64`. Throws [NvsError] if it is out of
+/// range or of the wrong kind.
+Uint8List packPrimitive(NvsType type, Object value) {
   final width = type.width;
   if (width == null) throw ArgumentError.value(type, 'type', 'not a primitive');
-  if (width < 8) {
-    final (min, max) = type.signed ? (-(1 << (width * 8 - 1)), (1 << (width * 8 - 1)) - 1) : (0, (1 << (width * 8)) - 1);
-    if (value < min || value > max) {
-      throw NvsError('Value $value does not fit in ${type.label} ($min..$max)');
-    }
-  }
   final out = Uint8List(8)..fillRange(0, 8, 0xFF);
   final view = ByteData.sublistView(out);
+
+  if (width == 8) {
+    final big = switch (value) {
+      BigInt v => v,
+      int v => BigInt.from(v),
+      _ => throw NvsError("Value for ${type.label} must be a BigInt, not ${value.runtimeType}"),
+    };
+    final (min, max) = type.signed ? (-(BigInt.one << 63), (BigInt.one << 63) - BigInt.one) : (BigInt.zero, (BigInt.one << 64) - BigInt.one);
+    if (big < min || big > max) throw NvsError('Value $big does not fit in ${type.label} ($min..$max)');
+    // Two 32-bit halves through BigInt: dart2js has neither setUint64 nor 64-bit shifts.
+    final bits = big.toUnsigned(64);
+    view.setUint32(0, (bits & _mask32).toInt(), Endian.little);
+    view.setUint32(4, (bits >> 32).toInt(), Endian.little);
+    return out;
+  }
+
+  if (value is! int) throw NvsError("Value for ${type.label} must be an int, not ${value.runtimeType}");
+  // Literal bounds: `1 << 32` wraps under dart2js, where shifts are 32-bit.
+  final (min, max) = switch ((width, type.signed)) {
+    (1, false) => (0, 0xFF),
+    (1, true) => (-0x80, 0x7F),
+    (2, false) => (0, 0xFFFF),
+    (2, true) => (-0x8000, 0x7FFF),
+    (4, false) => (0, 0xFFFFFFFF),
+    _ => (-0x80000000, 0x7FFFFFFF),
+  };
+  if (value < min || value > max) throw NvsError('Value $value does not fit in ${type.label} ($min..$max)');
   switch (width) {
     case 1:
-      view.setUint8(0, value & 0xFF);
+      view.setUint8(0, value);
     case 2:
-      view.setUint16(0, value & 0xFFFF, Endian.little);
-    case 4:
-      view.setUint32(0, value & 0xFFFFFFFF, Endian.little);
+      view.setUint16(0, value, Endian.little);
     default:
-      // Two halves rather than setUint64, which dart2js doesn't have.
-      view.setUint32(0, value & 0xFFFFFFFF, Endian.little);
-      view.setUint32(4, (value >> 32) & 0xFFFFFFFF, Endian.little);
+      view.setUint32(0, value, Endian.little);
   }
   return out;
 }
 
-/// Read a primitive out of the 8-byte data field.
-int unpackPrimitive(NvsType type, Uint8List data) {
+/// Read a primitive out of the 8-byte data field: an `int`, or a `BigInt`
+/// for the 64-bit types.
+Object unpackPrimitive(NvsType type, Uint8List data) {
   final width = type.width;
   if (width == null) throw ArgumentError.value(type, 'type', 'not a primitive');
   final view = ByteData.sublistView(data);
+  if (width == 8) {
+    final value = (BigInt.from(view.getUint32(4, Endian.little)) << 32) | BigInt.from(view.getUint32(0, Endian.little));
+    return type.signed ? value.toSigned(64) : value;
+  }
   return switch ((width, type.signed)) {
     (1, false) => view.getUint8(0),
     (1, true) => view.getInt8(0),
     (2, false) => view.getUint16(0, Endian.little),
     (2, true) => view.getInt16(0, Endian.little),
     (4, false) => view.getUint32(0, Endian.little),
-    (4, true) => view.getInt32(0, Endian.little),
-    _ => (view.getUint32(4, Endian.little) << 32) | view.getUint32(0, Endian.little),
+    _ => view.getInt32(0, Endian.little),
   };
 }
 

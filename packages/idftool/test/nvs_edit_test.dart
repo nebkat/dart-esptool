@@ -163,6 +163,28 @@ void main() {
       expect(after.namespaces, {1: 'nums', 2: 'text', 3: 'bin'});
     });
 
+    test('64-bit values can be given as int or BigInt and compare as BigInt', () {
+      final data = fixtureBytes('types.bin');
+      final unchanged = applyNvsEdits(data, [
+        NvsEdit.set('nums', 'i64_pos', type: NvsType.i64, value: 1234567890123),
+        NvsEdit.set('nums', 'i64_pos', type: NvsType.i64, value: BigInt.from(1234567890123)),
+        NvsEdit.set('nums', 'u64_max', type: NvsType.u64, value: (BigInt.one << 64) - BigInt.one),
+      ]);
+      expect(unchanged.changes.map((c) => c.action), everyElement(NvsChangeAction.unchanged));
+      final result = applyNvsEdits(data, [
+        NvsEdit.set('nums', 'u64_max', type: NvsType.u64, value: BigInt.one << 63),
+        NvsEdit.set('nums', 'i64_pos', type: NvsType.i64, value: -7),
+        NvsEdit.set('nums', 'u8_max', type: NvsType.u8, value: 3),
+      ]);
+      final image = parseNvs(result.image, strict: true);
+      expect(image.get('nums', 'u64_max')!.value, BigInt.one << 63);
+      expect(image.get('nums', 'i64_pos')!.value, BigInt.from(-7));
+      expect(image.get('nums', 'u8_max')!.value, 3);
+      expect(describeNvsChange(result.changes[0]), '  ~ nums:u64_max (u64): 18446744073709551615 -> 9223372036854775808');
+      expect(() => applyNvsEdits(data, [NvsEdit.set('nums', 'u64_max', type: NvsType.u64, value: -BigInt.one)]),
+          throwsA(isA<NvsError>()));
+    });
+
     test('a new namespace gets the next index', () {
       final data = fixtureBytes('types.bin');
       final result = applyNvsEdits(data, [NvsEdit.set('fresh', 'k', type: NvsType.i32, value: -7)]);
@@ -201,7 +223,7 @@ void main() {
       final ns = image.pages[0].entries.first;
       expect(encodePrimitive(0, 'nums', NvsType.u8, 1), at(ns, 1));
       final u64 = image.get('nums', 'u64_max')!.raw.single;
-      expect(encodePrimitive(1, 'u64_max', NvsType.u64, -1), at(u64, 1));
+      expect(encodePrimitive(1, 'u64_max', NvsType.u64, (BigInt.one << 64) - BigInt.one), at(u64, 1));
       final long = image.get('text', 'long')!.raw.single;
       final payload = [...('The quick brown fox jumps over the lazy dog. ' * 3).codeUnits, 0];
       expect(encodeVarlen(2, 'long', NvsType.string, payload), at(long, long.span));

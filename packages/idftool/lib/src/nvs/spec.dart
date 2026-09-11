@@ -26,7 +26,8 @@ const String nvsSpecHelp = 'A spec is `namespace:key=value`, or `namespace:key:t
 String _knownTypes() => NvsType.writable.map((t) => t.label).join(', ');
 
 /// Turn the text after the `=` into the value the entry will hold: an `int`
-/// for a primitive, a `String`, or bytes decoded from hex for a blob.
+/// for a primitive up to 32 bits, a `BigInt` for `u64`/`i64`, a `String`, or
+/// bytes decoded from hex for a blob.
 ///
 /// A value of `@path` is read through [readFile] instead — raw bytes for a
 /// blob, text for a string, and trimmed text for a number.
@@ -181,14 +182,14 @@ String describeNvsChange(NvsChange change) {
   return switch (change.action) {
     NvsChangeAction.unchanged => '  = ${edit.qualified} unchanged',
     NvsChangeAction.deleted => '  - ${edit.qualified} ($type) deleted',
-    NvsChangeAction.added => '  + ${edit.qualified} ($type) = ${shortNvsValue(edit.value!, type: change.type)}',
+    NvsChangeAction.added => '  + ${edit.qualified} ($type) = ${shortNvsValue(edit.value!)}',
     NvsChangeAction.set => '  ~ ${edit.qualified} ($type): '
-        '${shortNvsValue(change.before!.value, type: change.type)} -> ${shortNvsValue(edit.value!, type: change.type)}',
+        '${shortNvsValue(change.before!.value)} -> ${shortNvsValue(edit.value!)}',
   };
 }
 
 /// A value abbreviated to [limit] characters for a one-line report.
-String shortNvsValue(Object value, {NvsType? type, int limit = 48}) {
-  final text = formatNvsValue(value, type: type);
+String shortNvsValue(Object value, {int limit = 48}) {
+  final text = formatNvsValue(value);
   return text.length <= limit ? text : '${text.substring(0, limit)}…';
 }

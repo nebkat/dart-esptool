@@ -42,8 +42,9 @@ Uint8List _pad(List<int> payload) {
   return out;
 }
 
-/// A single-entry primitive item.
-Uint8List encodePrimitive(int nsIndex, String key, NvsType type, int value) {
+/// A single-entry primitive item. [value] is an `int`, or a `BigInt` for the
+/// 64-bit types (see [packPrimitive]).
+Uint8List encodePrimitive(int nsIndex, String key, NvsType type, Object value) {
   final entry = _entryHeader(nsIndex, type.code, 1, NvsLayout.chunkAny, key);
   entry.setRange(24, 32, packPrimitive(type, value));
   return _seal(entry);
@@ -254,8 +255,10 @@ class NvsWriter {
   /// written, so a later edit in the same batch can [erase] them.
   List<RawEntry> writeItem(int nsIndex, String key, NvsType type, Object value, {NvsEntry? previous}) {
     if (type.isPrimitive) {
-      if (value is! int) throw NvsError("Value for ${type.label} '$key' must be an int, not ${value.runtimeType}");
-      return append(pageWithRoom(1), encodePrimitive(nsIndex, key, type, value));
+      if (value is! int && value is! BigInt) {
+        throw NvsError("Value for ${type.label} '$key' must be a number, not ${value.runtimeType}");
+      }
+      return append(pageWithRoom(1), encodePrimitive(nsIndex, key, type, normalizeNvsValue(type, value)));
     }
     if (type == NvsType.string) {
       if (value is! String) throw NvsError("Value for string '$key' must be a String, not ${value.runtimeType}");

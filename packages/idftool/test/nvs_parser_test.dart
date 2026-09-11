@@ -45,9 +45,12 @@ void main() {
       expect(image.namespaceIndex('text'), 2);
       expect(image.namespaceIndex('nope'), isNull);
 
-      expect(image.get('nums', 'u64_max')!.value, -1);
+      expect(image.get('nums', 'u64_max')!.value, BigInt.parse('18446744073709551615'));
       expect(image.get('nums', 'u64_max')!.valueText, '18446744073709551615');
-      expect(image.get('nums', 'i64_min')!.value, -9223372036854775808);
+      expect(image.get('nums', 'i64_min')!.value, BigInt.parse('-9223372036854775808'));
+      expect(image.get('nums', 'i64_pos')!.value, BigInt.from(1234567890123));
+      expect(image.get('nums', 'u32_v')!.value, 0xFFFFFFFF);
+      expect(image.get('nums', 'u32_v')!.value, isA<int>());
       expect(image.get('nums', 'i8_min')!.value, -128);
       expect(image.get('nums', 'u8_max')!.size, 1);
 

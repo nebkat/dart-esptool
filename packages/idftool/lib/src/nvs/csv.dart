@@ -212,11 +212,10 @@ final _fillPattern = RegExp(r'^(blob_fill|blob_sz_fill)\((\d+);(0x[0-9a-fA-F]{2}
 }
 
 /// Parse an integer for [type], accepting a sign and `0x`/`0o`/`0b`
-/// prefixes like python's `int(text, 0)`. Returns `null` if unparseable or
-/// outside the unsigned range for `u64` (which comes back as the `int` with
-/// the same 64-bit pattern, i.e. negative above `2^63 - 1`). Other range
-/// checks are left to [packPrimitive].
-int? parseNvsInt(String text, NvsType type) {
+/// prefixes like python's `int(text, 0)`. Returns a `BigInt` for the 64-bit
+/// types and an `int` otherwise, or `null` if the text is not a number or is
+/// hopelessly large. Range checks are left to [packPrimitive].
+Object? parseNvsInt(String text, NvsType type) {
   var body = text.trim();
   var negative = false;
   if (body.startsWith('-') || body.startsWith('+')) {
@@ -237,11 +236,10 @@ int? parseNvsInt(String text, NvsType type) {
   final magnitude = BigInt.tryParse(body, radix: radix);
   if (magnitude == null) return null;
   final value = negative ? -magnitude : magnitude;
-  if (type == NvsType.u64) {
-    if (value.isNegative || value.bitLength > 64) return null;
-    return value.toSigned(64).toInt();
-  }
-  if (value.bitLength > 63) return null; // outside int; packPrimitive reports the range
+  if (type.width == 8) return value;
+  // A JavaScript int holds 53 bits; anything bigger is out of range for the ≤32-bit
+  // types anyway, and packPrimitive reports the range on what does come through.
+  if (value.bitLength > 52) return null;
   return value.toInt();
 }
 

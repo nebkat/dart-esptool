@@ -712,10 +712,24 @@ class PartitionTable extends UnmodifiableListView<PartitionDefinition> {
 
   PartitionDefinition? findByName(String name) => firstWhereOrNull((p) => p.name == name);
 
-  /// Match by type and subtype, given either as a number or a CSV keyword.
+  /// Match by type and subtype, each given as a number, a CSV keyword, or one
+  /// of the [PartitionType] / subtype enums.
   Iterable<PartitionDefinition> findByType(Object type, Object subtype) {
-    final typeValue = type is int ? type : parseIntField(type as String, PartitionType.keywords);
-    final subtypeValue = subtype is int ? subtype : parseIntField(subtype as String, subtypeKeywords(typeValue));
+    final typeValue = switch (type) {
+      int v => v,
+      PartitionType t => t.value,
+      String s => parseIntField(s, PartitionType.keywords),
+      _ => throw ArgumentError.value(type, 'type'),
+    };
+    final subtypeValue = switch (subtype) {
+      int v => v,
+      BootloaderSubtype s => s.value,
+      PartitionTableSubtype s => s.value,
+      AppSubtype s => s.value,
+      DataSubtype s => s.value,
+      String s => parseIntField(s, subtypeKeywords(typeValue)),
+      _ => throw ArgumentError.value(subtype, 'subtype'),
+    };
     return where((p) => p.type == typeValue && p.subtype == subtypeValue);
   }
 

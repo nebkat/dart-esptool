@@ -16,7 +16,10 @@ void main() {
       expect(parseNvsSetSpec('ns:s:string=a=b').value, 'a=b', reason: 'only the first = splits');
       expect(parseNvsSetSpec('ns:b:blob=de ad\tbe ef').value, [0xde, 0xad, 0xbe, 0xef]);
       expect(parseNvsSetSpec('ns:n:i8=-5').value, -5);
-      expect(parseNvsSetSpec('ns:n:u64=18446744073709551615').value, -1);
+      expect(parseNvsSetSpec('ns:n:u64=18446744073709551615').value, BigInt.parse('18446744073709551615'));
+      expect(parseNvsSetSpec('ns:n:i64=-9223372036854775808').value, BigInt.parse('-9223372036854775808'));
+      expect(parseNvsSetSpec('ns:n:i64=5').value, BigInt.from(5));
+      expect(parseNvsSetSpec('ns:n:u32=5').value, 5);
     });
 
     test('untyped specs keep the raw text', () {
@@ -131,7 +134,7 @@ void main() {
       expect(describeNvsChange(NvsChange(edit, NvsChangeAction.set, before: before, type: NvsType.u8)),
           '  ~ ns:k (u8): 0 -> 1');
       expect(shortNvsValue(blob(100, 0)), '${hex(blob(24, 0))}…');
-      expect(shortNvsValue(-1, type: NvsType.u64), '18446744073709551615');
+      expect(shortNvsValue((BigInt.one << 64) - BigInt.one), '18446744073709551615');
     });
   });
 

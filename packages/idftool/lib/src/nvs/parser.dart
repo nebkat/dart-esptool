@@ -184,7 +184,9 @@ String _hex32(int value) => '0x${value.toRadixString(16).padLeft(8, '0')}';
   for (final entry in rawEntries) {
     final type = entry.type;
     if (entry.nsIndex == 0 && type != null && type.isPrimitive) {
-      final index = unpackPrimitive(type, entry.data);
+      // Namespace entries are u8; a 64-bit one would be nonsense, so squash it to an int.
+      final unpacked = unpackPrimitive(type, entry.data);
+      final index = unpacked is BigInt ? (unpacked.isValidInt ? unpacked.toInt() : -1) : unpacked as int;
       final existing = namespaces[index];
       if (existing != null && existing != entry.key) {
         _fail(errors, strict, "namespace index $index is claimed by both '$existing' and '${entry.key}'");

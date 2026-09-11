@@ -5,6 +5,9 @@ import 'package:test/test.dart';
 
 import 'nvs_fixtures.dart';
 
+final u64Max = (BigInt.one << 64) - BigInt.one;
+final i64Min = -(BigInt.one << 63);
+
 void main() {
   group('crc32', () {
     // python: zlib.crc32(b'abc', 0xFFFFFFFF) & 0xFFFFFFFF
@@ -30,15 +33,15 @@ void main() {
 
   group('primitives', () {
     test('pack and unpack round-trip every width', () {
-      final cases = {
+      final cases = <NvsType, List<Object>>{
         NvsType.u8: [0, 255],
         NvsType.i8: [-128, 127],
         NvsType.u16: [0, 65535],
         NvsType.i16: [-32768, 32767],
         NvsType.u32: [0, 0xFFFFFFFF],
         NvsType.i32: [-2147483648, 2147483647],
-        NvsType.u64: [0, -1, 1 << 62],
-        NvsType.i64: [-9223372036854775808, 9223372036854775807, 1234567890123],
+        NvsType.u64: [BigInt.zero, u64Max, BigInt.one << 62, BigInt.one << 32],
+        NvsType.i64: [i64Min, (BigInt.one << 63) - BigInt.one, BigInt.from(1234567890123), -BigInt.one],
       };
       for (final MapEntry(key: type, value: values) in cases.entries) {
         for (final value in values) {
@@ -48,30 +51,51 @@ void main() {
           expect(unpackPrimitive(type, packed), value, reason: '${type.label} $value');
         }
       }
+      // 64-bit types also take a plain int, but always come back as BigInt.
+      expect(unpackPrimitive(NvsType.i64, packPrimitive(NvsType.i64, -5)), BigInt.from(-5));
+      expect(unpackPrimitive(NvsType.u64, packPrimitive(NvsType.u64, 7)), BigInt.from(7));
+      expect(packPrimitive(NvsType.u64, u64Max), everyElement(0xFF));
+      expect(packPrimitive(NvsType.i64, i64Min), [0, 0, 0, 0, 0, 0, 0, 0x80]);
     });
 
     test('packs the same bytes as the python fixture', () {
       final image = parseNvs(fixtureBytes('types.bin'));
       for (final entry in image.entries.where((e) => e.type.isPrimitive)) {
-        expect(packPrimitive(entry.type, entry.value as int), entry.raw.single.data, reason: entry.key);
+        expect(packPrimitive(entry.type, entry.value), entry.raw.single.data, reason: entry.key);
+        expect(entry.value, entry.type.width == 8 ? isA<BigInt>() : isA<int>(), reason: entry.key);
       }
     });
 
-    test('rejects out-of-range values', () {
+    test('rejects out-of-range or wrongly typed values', () {
       expect(() => packPrimitive(NvsType.u8, 256), throwsA(isA<NvsError>()));
       expect(() => packPrimitive(NvsType.u8, -1), throwsA(isA<NvsError>()));
       expect(() => packPrimitive(NvsType.i8, 128), throwsA(isA<NvsError>()));
       expect(() => packPrimitive(NvsType.u32, 1 << 32), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.u64, -BigInt.one), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.u64, u64Max + BigInt.one), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.i64, i64Min - BigInt.one), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.i64, BigInt.one << 63), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.u8, BigInt.one), throwsA(isA<NvsError>()));
+      expect(() => packPrimitive(NvsType.u64, 'x'), throwsA(isA<NvsError>()));
       expect(() => packPrimitive(NvsType.string, 1), throwsArgumentError);
     });
 
-    test('u64 formats unsigned', () {
-      expect(formatNvsValue(-1, type: NvsType.u64), '18446744073709551615');
-      expect(formatNvsValue(-1, type: NvsType.i64), '-1');
+    test('64-bit values are BigInt, formatted and parsed as plain decimal', () {
+      expect(formatNvsValue(u64Max), '18446744073709551615');
+      expect(formatNvsValue(i64Min), '-9223372036854775808');
+      expect(formatNvsValue(-1), '-1');
       expect(formatNvsValue(Uint8List.fromList([0xde, 0xad])), 'dead');
-      expect(parseNvsInt('18446744073709551615', NvsType.u64), -1);
-      expect(parseNvsInt('-1', NvsType.u64), isNull);
-      expect(parseNvsInt('18446744073709551616', NvsType.u64), isNull);
+      expect(parseNvsInt('18446744073709551615', NvsType.u64), u64Max);
+      expect(parseNvsInt('-1', NvsType.u64), -BigInt.one, reason: 'range is checked when packing');
+      expect(parseNvsInt('-9223372036854775808', NvsType.i64), i64Min);
+      expect(parseNvsInt('0x10', NvsType.i64), BigInt.from(16));
+      expect(parseNvsInt('99999999999999999999', NvsType.u32), isNull);
+      expect(normalizeNvsValue(NvsType.u64, 5), BigInt.from(5));
+      expect(normalizeNvsValue(NvsType.u8, BigInt.from(5)), 5);
+      expect(normalizeNvsValue(NvsType.string, 'x'), 'x');
+      expect(valuesEqual(BigInt.from(5), BigInt.from(5)), isTrue);
+      expect(valuesEqual(Uint8List.fromList([1, 2]), [1, 2]), isTrue);
+      expect(valuesEqual(Uint8List.fromList([1, 2]), [1, 3]), isFalse);
       expect(parseNvsInt('0x10', NvsType.u8), 16);
       expect(parseNvsInt('-0b11', NvsType.i8), -3);
       expect(parseNvsInt('0o17', NvsType.u8), 15);

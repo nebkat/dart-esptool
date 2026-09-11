@@ -82,13 +82,8 @@ class NvsEditResult {
   return (existing, existing.type);
 }
 
-bool _same(NvsEntry entry, NvsType type, Object? value) => entry.type == type && valuesEqual(entry.value, value);
-
-/// Whether two entry values are equal, comparing blobs by content.
-bool valuesEqual(Object? a, Object? b) {
-  if (a is List<int> && b is List<int>) return const ListEquality<int>().equals(a, b);
-  return a == b;
-}
+bool _same(NvsEntry entry, NvsType type, Object? value) =>
+    entry.type == type && value != null && valuesEqual(entry.value, normalizeNvsValue(type, value));
 
 /// Apply [edits] to an NVS image.
 ///
@@ -205,7 +200,13 @@ List<NvsChange> _plan(NvsImage image, List<NvsEdit> edits) {
     // Keep the model current so a later edit in this batch that touches the same key
     // replaces (and erases) what was just written.
     image.entries.add(NvsEntry(
-        namespace: edit.namespace, key: edit.key, type: type, value: edit.value!, size: 0, nsIndex: nsIndex, raw: raw));
+        namespace: edit.namespace,
+        key: edit.key,
+        type: type,
+        value: normalizeNvsValue(type, edit.value!),
+        size: 0,
+        nsIndex: nsIndex,
+        raw: raw));
   }
 
   return (buffer, changes);
@@ -235,7 +236,7 @@ Uint8List rewriteNvs(NvsImage image, List<NvsEdit> edits) {
         namespace: edit.namespace,
         key: edit.key,
         type: type!,
-        value: edit.value!,
+        value: normalizeNvsValue(type, edit.value!),
         size: 0,
         nsIndex: image.namespaceIndex(edit.namespace) ?? 0);
   }

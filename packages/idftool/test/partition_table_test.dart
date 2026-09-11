@@ -117,9 +117,12 @@ void main() {
       expect(fromCsv.format(), fixtureFormatted);
     });
 
-    test('findByType accepts keywords or numbers', () {
+    test('findByType accepts keywords, numbers or enums', () {
       expect(fromCsv.findByType('app', 'ota_0').single.name, 'ota_0');
       expect(fromCsv.findByType(0, 0x11).single.name, 'ota_1');
+      expect(fromCsv.findByType(PartitionType.data, DataSubtype.nvs).single.name, 'nvs');
+      expect(fromCsv.findByType(PartitionType.app, AppSubtype.factory).single.name, 'factory');
+      expect(() => fromCsv.findByType(1.5, 0), throwsArgumentError);
       expect(fromCsv.findByType('data', 'spiffs').single.name, 'storage');
       expect(fromCsv.findByType('data', 'fat'), isEmpty);
       expect(fromCsv.findByName('nope'), isNull);

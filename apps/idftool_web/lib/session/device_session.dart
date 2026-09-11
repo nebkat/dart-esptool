@@ -4,6 +4,7 @@ import 'dart:js_interop';
 import 'package:esptool/esptool.dart';
 import 'package:esptool/web.dart';
 import 'package:flutter/foundation.dart';
+import 'package:idftool/idftool.dart';
 import 'package:web/web.dart' as web;
 
 /// How to get the chip into download mode when connecting.
@@ -61,6 +62,7 @@ class DeviceSession extends ChangeNotifier {
   SessionState state = SessionState.disconnected;
   WebSerialTransport? _transport;
   EspLoader? _loader;
+  IdfDevice? _device;
   EspChip? chip;
   int? flashSize;
   Uint8List? mac;
@@ -71,6 +73,9 @@ class DeviceSession extends ChangeNotifier {
   final List<LogLine> log = [];
 
   EspLoader? get loader => _loader;
+
+  /// The idftool device layer over [loader], while connected.
+  IdfDevice? get device => _device;
   bool get connected => state == SessionState.connected || state == SessionState.busy;
   bool get busy => state == SessionState.busy || state == SessionState.connecting;
 
@@ -186,6 +191,7 @@ class DeviceSession extends ChangeNotifier {
       }
       chip = detected;
       flashSize = await loader.attachFlash();
+      _device = IdfDevice(loader);
       if (useStub) {
         await loader.runStub();
       }
@@ -233,6 +239,7 @@ class DeviceSession extends ChangeNotifier {
     final loader = _loader;
     final transport = _transport;
     _loader = null;
+    _device = null;
     _transport = null;
     chip = null;
     flashSize = null;
@@ -246,9 +253,13 @@ class DeviceSession extends ChangeNotifier {
 
   /// Run [op] against the connected loader as the one active operation,
   /// logging failures. Returns `null` if it failed or nothing is connected.
-  Future<T?> run<T>(String label, Future<T> Function(EspLoader loader) op) async {
-    final loader = _loader;
-    if (loader == null || state != SessionState.connected) {
+  Future<T?> run<T>(String label, Future<T> Function(EspLoader loader) op) =>
+      runDevice(label, (device) => op(device.loader));
+
+  /// [run], handing the operation the [IdfDevice].
+  Future<T?> runDevice<T>(String label, Future<T> Function(IdfDevice device) op) async {
+    final device = _device;
+    if (device == null || state != SessionState.connected) {
       addLog('Not connected', error: true);
       return null;
     }
@@ -258,16 +269,14 @@ class DeviceSession extends ChangeNotifier {
     notifyListeners();
     final stopwatch = Stopwatch()..start();
     try {
-      final result = await op(loader);
+      final result = await op(device);
       addLog('$label: done in ${_seconds(stopwatch.elapsed)}');
       return result;
     } catch (e) {
       addLog('$label failed: $e', error: true);
-      if (e is! EspException) {
-        // Transport-level failure (device gone, port closed): the connection
-        // can't be trusted any more.
-        _lost('Connection lost');
-      }
+      // Only a port that has actually gone away means the connection is
+      // lost; anything else (protocol, input or a bug) leaves it usable.
+      if (!(_transport?.port.connected ?? false)) _lost('Connection lost');
       return null;
     } finally {
       if (state == SessionState.busy) state = SessionState.connected;
@@ -277,7 +286,7 @@ class DeviceSession extends ChangeNotifier {
     }
   }
 
-  /// Progress callback for the running operation.
+  /// Progress callback for the running operation (an idftool [ProgressCallback]).
   void reportProgress(String label, int done, int total) {
     progress = Progress(label, done, total);
     notifyListeners();

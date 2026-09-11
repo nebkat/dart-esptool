@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'pages/device_page.dart';
+import 'pages/firmware_page.dart';
+import 'pages/nvs_page.dart';
+import 'pages/partitions_page.dart';
 import 'session/device_session.dart';
+import 'widgets/connection_bar.dart';
 import 'widgets/log_panel.dart';
 
 void main() {
@@ -70,52 +74,35 @@ class _HomeShellState extends State<HomeShell> {
       builder: (context, _) {
         final page = switch (_tool) {
           Tool.device => DevicePage(session: _session),
-          Tool.partitions => const _Pending('Partition table'),
-          Tool.nvs => const _Pending('NVS'),
-          Tool.firmware => const _Pending('Firmware'),
+          Tool.partitions => PartitionsPage(session: _session),
+          Tool.nvs => NvsPage(session: _session),
+          Tool.firmware => FirmwarePage(session: _session),
         };
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('idftool'),
-            actions: [
-              if (_session.connected)
-                Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: Chip(
-                    avatar: const Icon(Icons.check_circle, size: 18, color: Colors.green),
-                    label: Text(_session.chip?.name ?? ''),
-                  ),
-                ),
-            ],
-          ),
-          body: Row(children: [
-            NavigationRail(
-              selectedIndex: _tool.index,
-              labelType: NavigationRailLabelType.all,
-              onDestinationSelected: (i) => setState(() => _tool = Tool.values[i]),
-              destinations: [
-                for (final t in Tool.values) NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
-              ],
-            ),
-            const VerticalDivider(width: 1),
+          appBar: AppBar(title: const Text('idftool')),
+          body: Column(children: [
+            ConnectionBar(session: _session),
+            const Divider(height: 1),
             Expanded(
-              child: Column(children: [
-                Expanded(flex: 3, child: page),
-                const Divider(height: 1),
-                Expanded(flex: 1, child: LogPanel(session: _session)),
+              flex: 3,
+              child: Row(children: [
+                NavigationRail(
+                  selectedIndex: _tool.index,
+                  labelType: NavigationRailLabelType.all,
+                  onDestinationSelected: (i) => setState(() => _tool = Tool.values[i]),
+                  destinations: [
+                    for (final t in Tool.values) NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
+                  ],
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: page),
               ]),
             ),
+            const Divider(height: 1),
+            Expanded(flex: 1, child: LogPanel(session: _session)),
           ]),
         );
       },
     );
   }
-}
-
-class _Pending extends StatelessWidget {
-  const _Pending(this.what);
-  final String what;
-
-  @override
-  Widget build(BuildContext context) => Center(child: Text('$what tools arrive with the idftool port.'));
 }
