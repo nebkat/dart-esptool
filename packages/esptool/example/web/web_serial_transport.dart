@@ -1,4 +1,3 @@
-// @dart=3.4
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
