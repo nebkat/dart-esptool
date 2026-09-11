@@ -1,0 +1,25 @@
+name: idftool_web
+description: Browser UI for idftool-style operations on ESP-IDF devices over Web Serial.
+publish_to: none
+version: 0.1.0+1
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  esptool: ^0.3.0
+  file_picker: ^12.1.1
+  idftool: ^0.1.0
+  share_plus: ^13.3.0
+  web: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
