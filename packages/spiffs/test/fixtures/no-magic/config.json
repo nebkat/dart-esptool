@@ -1,0 +1,6 @@
+{
+  "size": 65536,
+  "options": [
+    "--no-spiffs-use-magic"
+  ]
+}

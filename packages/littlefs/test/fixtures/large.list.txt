@@ -1,0 +1,4 @@
+big200k.txt	204800
+big300k.txt	307200
+noise20k.bin	20480
+small.txt	6

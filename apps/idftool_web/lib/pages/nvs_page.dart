@@ -11,8 +11,11 @@ import '../widgets/type_chip.dart';
 /// Browse and edit an NVS partition: entries grouped by namespace, pending
 /// edits applied in one write of only the pages that changed.
 class NvsPage extends StatefulWidget {
-  const NvsPage({super.key, required this.session});
+  const NvsPage({super.key, required this.session, this.initialPartition});
   final DeviceSession session;
+
+  /// The NVS partition to open first, by name (the first one if `null`).
+  final String? initialPartition;
 
   @override
   State<NvsPage> createState() => _NvsPageState();
@@ -46,7 +49,8 @@ class _NvsPageState extends State<NvsPage> {
     await session.runDevice('Read NVS', (device) async {
       final table = await device.partitionTable();
       final partitions = table.findByType(PartitionType.data, DataSubtype.nvs).toList();
-      final partition = _partition != null && partitions.contains(_partition) ? _partition : partitions.firstOrNull;
+      final wanted = _partition?.name ?? widget.initialPartition;
+      final partition = partitions.where((p) => p.name == wanted).firstOrNull ?? partitions.firstOrNull;
       if (partition == null) throw IdfToolException('No NVS partition in the partition table');
       final (partition: _, image: image) = await device.readNvs(name: partition.name, onProgress: session.reportProgress);
       for (final e in image.errors) {

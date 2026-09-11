@@ -1,0 +1,5 @@
+| Path                                                     |      Size |
+|----------------------------------------------------------|-----------|
+| a-name-that-is-far-longer-than-thirty-two-characters.txt |        40 |
+| b.bin                                                    |      3000 |
+2 files, 3040 bytes

@@ -7,6 +7,7 @@ library;
 
 export 'src/device.dart';
 export 'src/flash/differential.dart';
+export 'src/fs/fs.dart';
 export 'src/int_literal.dart';
 export 'src/nvs/nvs.dart';
 export 'src/otadata.dart';

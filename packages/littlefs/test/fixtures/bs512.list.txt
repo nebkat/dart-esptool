@@ -1,0 +1,8 @@
+dir	dir
+dir/n1000.bin	1000
+dir/sub	dir
+dir/sub/x.txt	2
+n300.bin	300
+n60.bin	60
+n65.bin	65
+sixtyk.txt	61440

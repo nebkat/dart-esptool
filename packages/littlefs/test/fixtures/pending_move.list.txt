@@ -1,0 +1,5 @@
+dst	dir
+dst/moved.txt	2000
+dst/other.txt	6
+src	dir
+src/zlast.txt	19

@@ -1,0 +1,7 @@
+{
+  "size": 131072,
+  "options": [
+    "--spiffs-block-size",
+    "8192"
+  ]
+}

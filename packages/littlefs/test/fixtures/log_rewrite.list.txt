@@ -1,0 +1,16 @@
+aaa.txt	12
+append.txt	1800
+dst	dir
+dst/moved.txt	3000
+dst/zzz.txt	11
+grow.bin	9000
+m0.txt	12
+m2-renamed.txt	8
+m4.txt	8
+m6.txt	8
+m7.txt	8
+m8.txt	8
+m9.txt	8
+renamed-src	dir
+shrink.bin	100
+trunc.txt	0

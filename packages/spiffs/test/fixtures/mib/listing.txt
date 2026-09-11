@@ -1,0 +1,6 @@
+| Path                |      Size |
+|---------------------|-----------|
+| small.txt           |       100 |
+| sub/medium.bin      |      5000 |
+| three-hundred-k.bin |    307217 |
+3 files, 312317 bytes

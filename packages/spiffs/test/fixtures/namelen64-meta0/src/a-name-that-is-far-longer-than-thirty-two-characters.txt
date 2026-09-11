@@ -1,0 +1,1 @@
+line from file 100: the quick brown fox 

@@ -1,0 +1,8 @@
+| Path                            |      Size |
+|---------------------------------|-----------|
+| UPPER.CASE.EXT                  |         5 |
+| abcdefghijklmnopqrstuvwxyz01234 |        24 |
+| dir/abcdefghijklmnopqrstuvwxyz0 |        20 |
+| with space.txt                  |         6 |
+| x                               |         2 |
+5 files, 57 bytes

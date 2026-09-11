@@ -1,0 +1,5 @@
+| Path     |      Size |
+|----------|-----------|
+| big.bin  |     50200 |
+| rest.bin |      7523 |
+2 files, 57723 bytes

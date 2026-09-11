@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'pages/device_page.dart';
+import 'pages/filesystem_page.dart';
 import 'pages/firmware_page.dart';
 import 'pages/nvs_page.dart';
 import 'pages/partitions_page.dart';
@@ -33,6 +34,7 @@ enum Tool {
   device('Device', Icons.memory),
   partitions('Partitions', Icons.table_chart_outlined),
   nvs('NVS', Icons.storage),
+  filesystem('Files', Icons.folder_outlined),
   firmware('Firmware', Icons.system_update_alt);
 
   const Tool(this.label, this.icon);
@@ -50,6 +52,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   final _session = DeviceSession();
   Tool _tool = Tool.device;
+  String? _nvsPartition;
 
   @override
   void dispose() {
@@ -74,8 +77,15 @@ class _HomeShellState extends State<HomeShell> {
       builder: (context, _) {
         final page = switch (_tool) {
           Tool.device => DevicePage(session: _session),
-          Tool.partitions => PartitionsPage(session: _session),
-          Tool.nvs => NvsPage(session: _session),
+          Tool.partitions => PartitionsPage(
+              session: _session,
+              onOpenNvs: (name) => setState(() {
+                _nvsPartition = name;
+                _tool = Tool.nvs;
+              }),
+            ),
+          Tool.nvs => NvsPage(key: ValueKey(_nvsPartition), session: _session, initialPartition: _nvsPartition),
+          Tool.filesystem => FilesystemPage(session: _session),
           Tool.firmware => FirmwarePage(session: _session),
         };
         return Scaffold(

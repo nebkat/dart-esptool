@@ -1,0 +1,5 @@
+dir	dir
+dir/a.txt	2
+dir/b.bin	700
+hundredk.txt	102400
+z.txt	2

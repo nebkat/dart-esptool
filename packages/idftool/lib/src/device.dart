@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:esptool/esptool.dart';
 
 import 'flash/differential.dart';
+import 'fs/fs.dart';
 import 'int_literal.dart';
 import 'nvs/nvs.dart';
 import 'otadata.dart';
@@ -175,6 +176,42 @@ class IdfDevice {
       {String? partitionName, WriteStrategy strategy = WriteStrategy.differential, ProgressCallback? onProgress}) async {
     final partition = await nvsPartition(partitionName);
     return _write(partition.offset, fitNvsBinary(image, partition.size), strategy, onProgress, partition.name);
+  }
+
+  // --------------------------------------------------------------------------
+  // Filesystems
+  // --------------------------------------------------------------------------
+
+  /// The partition named [name] if it holds a filesystem (by subtype), or
+  /// with [name] `null` the first filesystem partition.
+  Future<PartitionDefinition> fsPartition([String? name]) async {
+    final table = await partitionTable();
+    if (name != null) {
+      final p = table.findByName(name) ?? (throw IdfToolException("No partition named '$name'"));
+      return p;
+    }
+    return table.where((p) => FsType.forPartition(p) != null).firstOrNull ??
+        (throw IdfToolException('No filesystem partition found'));
+  }
+
+  /// Read and mount a filesystem partition.
+  Future<({PartitionDefinition partition, FsVolume volume})> readFs({String? name, FsType? type, ProgressCallback? onProgress}) async {
+    final partition = await fsPartition(name);
+    final image = await loader.readFlash(partition.offset, partition.size,
+        onProgress: (done, total) => onProgress?.call('Reading ${partition.name}', done, total));
+    return (partition: partition, volume: FsVolume.mount(image, type: type, partition: partition));
+  }
+
+  /// Flash a filesystem [image] into its partition. Not padded: a
+  /// wear-levelled FAT image keeps its state in its last sectors and records
+  /// its own size, so padding would corrupt it.
+  Future<WriteOutcome> writeFs(Uint8List image,
+      {String? partitionName, WriteStrategy strategy = WriteStrategy.differential, ProgressCallback? onProgress}) async {
+    final partition = await fsPartition(partitionName);
+    if (image.length > partition.size) {
+      throw IdfToolException("Image size ${hex(image.length)} exceeds partition '${partition.name}' size ${hex(partition.size)}");
+    }
+    return _write(partition.offset, image, strategy, onProgress, partition.name);
   }
 
   // --------------------------------------------------------------------------

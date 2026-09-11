@@ -1,0 +1,7 @@
+dst	dir
+dst/moved.txt	2000
+dst/other.txt	6
+recovered.txt	34
+src	dir
+src/stays.txt	6
+src/zlast.txt	19

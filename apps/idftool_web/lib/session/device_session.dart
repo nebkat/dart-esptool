@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:idftool/idftool.dart';
 import 'package:web/web.dart' as web;
 
+import 'flash_plan.dart';
+
 /// How to get the chip into download mode when connecting.
 enum ResetChoice {
   auto('Auto'),
@@ -71,6 +73,9 @@ class DeviceSession extends ChangeNotifier {
   String? currentOperation;
 
   final List<LogLine> log = [];
+
+  /// Changes queued for the connected device (see [FlashPlan]).
+  final FlashPlan plan = FlashPlan();
 
   EspLoader? get loader => _loader;
 
@@ -191,7 +196,14 @@ class DeviceSession extends ChangeNotifier {
       }
       chip = detected;
       flashSize = await loader.attachFlash();
-      _device = IdfDevice(loader);
+      final device = IdfDevice(loader);
+      _device = device;
+      plan.attach(
+        chip: detected,
+        partitionTableOffset: device.partitionTableOffset,
+        partitionTableSize: device.partitionTableSize,
+        primaryBootloaderOffset: device.primaryBootloaderOffset,
+      );
       if (useStub) {
         await loader.runStub();
       }
@@ -240,6 +252,7 @@ class DeviceSession extends ChangeNotifier {
     final transport = _transport;
     _loader = null;
     _device = null;
+    plan.detach();
     _transport = null;
     chip = null;
     flashSize = null;
@@ -290,6 +303,12 @@ class DeviceSession extends ChangeNotifier {
   void reportProgress(String label, int done, int total) {
     progress = Progress(label, done, total);
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    plan.dispose();
+    super.dispose();
   }
 
   static String _hex(int v, int width) => '0x${v.toRadixString(16).padLeft(width, '0')}';

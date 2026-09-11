@@ -1,0 +1,4 @@
+block_size=512
+block_count=256
+name_max=64
+disk_version=0x20001

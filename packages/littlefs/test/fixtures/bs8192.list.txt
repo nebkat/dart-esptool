@@ -1,0 +1,5 @@
+dir	dir
+dir/y.txt	2
+hundredk.txt	102400
+n1000.bin	1000
+n1025.bin	1025

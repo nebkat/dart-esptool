@@ -1,0 +1,2 @@
+line from file 80: the quick brown fox jumps over the lazy dog
+line from file 80

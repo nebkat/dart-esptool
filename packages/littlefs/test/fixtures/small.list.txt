@@ -1,0 +1,4 @@
+a.txt	6
+sub	dir
+sub/big.txt	5000
+sub/empty	dir

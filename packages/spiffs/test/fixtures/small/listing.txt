@@ -1,0 +1,11 @@
+| Path          |      Size |
+|---------------|-----------|
+| hello.txt     |        13 |
+| notes.txt     |       700 |
+| one.bin       |         1 |
+| page+1.bin    |       252 |
+| page-1.bin    |       250 |
+| page.bin      |       251 |
+| two-pages.bin |       502 |
+| zero.bin      |         0 |
+8 files, 1969 bytes

@@ -1,0 +1,9 @@
+{
+  "size": 65536,
+  "options": [
+    "--spiffs-obj-name-len",
+    "64",
+    "--spiffs-meta-len",
+    "0"
+  ]
+}

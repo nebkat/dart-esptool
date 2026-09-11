@@ -1,0 +1,8 @@
+empty.txt	0
+hello.txt	12
+n1000.bin	1000
+n500.bin	500
+n512.bin	512
+n513.bin	513
+one.bin	1
+text.txt	300

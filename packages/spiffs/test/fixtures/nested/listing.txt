@@ -1,0 +1,8 @@
+| Path            |      Size |
+|-----------------|-----------|
+| a/b/c/deep.txt  |         5 |
+| a/b/sibling.txt |         8 |
+| a/top.txt       |         4 |
+| root.txt        |         5 |
+| z/last.bin      |       600 |
+5 files, 622 bytes

@@ -1,0 +1,7 @@
+| Path          |      Size |
+|---------------|-----------|
+| forty-k.bin   |     40960 |
+| hundred-k.bin |    102400 |
+| tail.txt      |       300 |
+| text-20k.txt  |     20480 |
+4 files, 164140 bytes

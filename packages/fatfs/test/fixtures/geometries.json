@@ -1,0 +1,280 @@
+[
+ {
+  "size": 262144,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 57
+  }
+ },
+ {
+  "size": 245760,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 53
+  }
+ },
+ {
+  "size": 1048576,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 249
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 1017
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 4096,
+  "sectors_per_cluster": 2,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 508
+  }
+ },
+ {
+  "size": 16777216,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 2,
+   "clusters": 4087
+  }
+ },
+ {
+  "size": 33554432,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 4,
+   "clusters": 8179
+  }
+ },
+ {
+  "size": 33554432,
+  "sector_size": 4096,
+  "sectors_per_cluster": 4,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 2046
+  }
+ },
+ {
+  "size": 268435456,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 32,
+   "clusters": 65467
+  }
+ },
+ {
+  "size": 268435456,
+  "sector_size": 4096,
+  "sectors_per_cluster": 16,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 3,
+   "clusters": 4095
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 32,
+   "clusters": 8095
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 512,
+  "sectors_per_cluster": 8,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 3,
+   "clusters": 1019
+  }
+ },
+ {
+  "size": 2121728,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 14,
+   "clusters": 4083
+  }
+ },
+ {
+  "size": 2120192,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 13,
+   "clusters": 4082
+  }
+ },
+ {
+  "size": 2124800,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 17,
+   "clusters": 4083
+  }
+ },
+ {
+  "size": 16793600,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 2,
+   "clusters": 4091
+  }
+ },
+ {
+  "size": 16809984,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 3,
+   "clusters": 4093
+  }
+ },
+ {
+  "size": 16826368,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 3,
+   "clusters": 4097
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": 16,
+  "geometry": {
+   "bits": 16,
+   "fat_size": 32,
+   "clusters": 8095
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 512,
+  "sectors_per_cluster": 1,
+  "fat_type": 12,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 2038,
+   "clusters": 4083
+  }
+ },
+ {
+  "size": 4194304,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": 16,
+  "error": "A 0x400000-byte volume only holds 1017 clusters, which every FAT implementation reads as FAT12, not the requested FAT16 \u2014 use a smaller --fat-sectors-per-cluster to get more clusters"
+ },
+ {
+  "size": 262144,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": 12,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 57
+  }
+ },
+ {
+  "size": 32768,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 1
+  }
+ },
+ {
+  "size": 16384,
+  "sector_size": 4096,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "error": "Partition of 0x4000 bytes is too small for a FAT filesystem"
+ },
+ {
+  "size": 1048576,
+  "sector_size": 1024,
+  "sectors_per_cluster": 1,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 2,
+   "clusters": 1003
+  }
+ },
+ {
+  "size": 1048576,
+  "sector_size": 2048,
+  "sectors_per_cluster": 2,
+  "fat_type": null,
+  "geometry": {
+   "bits": 12,
+   "fat_size": 1,
+   "clusters": 250
+  }
+ }
+]

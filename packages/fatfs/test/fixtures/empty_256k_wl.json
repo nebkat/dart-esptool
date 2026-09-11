@@ -1,0 +1,10 @@
+{
+ "size": 262144,
+ "options": {
+  "volume_id": 305419896,
+  "device_id": 2596069104
+ },
+ "geometry": "FAT12, 53 clusters of 0x1000 bytes, wear levelling overhead 0x4000 bytes",
+ "sources": [],
+ "entries": []
+}

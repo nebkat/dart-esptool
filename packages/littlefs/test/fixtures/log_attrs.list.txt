@@ -1,0 +1,4 @@
+attrs.txt	15
+d	dir
+d/inner.bin	5000
+plain.txt	14

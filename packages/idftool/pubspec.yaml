@@ -14,7 +14,10 @@ dependencies:
   crypto: ^3.0.6
   esptool: ^0.3.0
   esptool_libserialport: ^0.1.0
+  fatfs: ^0.1.0
+  littlefs: ^0.1.0
   meta: ^1.15.0
+  spiffs: ^0.1.0
 
 dev_dependencies:
   lints: ^6.0.0

@@ -1,0 +1,4 @@
+a.txt	12
+dir	dir
+dir/n9000.bin	9000
+dir/twenty.txt	20000

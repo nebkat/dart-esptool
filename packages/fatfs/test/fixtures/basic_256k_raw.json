@@ -1,0 +1,445 @@
+{
+ "size": 262144,
+ "options": {
+  "volume_id": 305419896,
+  "device_id": 2596069104,
+  "wear_levelling": false
+ },
+ "geometry": "FAT12, 57 clusters of 0x1000 bytes",
+ "sources": [
+  {
+   "path": ".hidden",
+   "is_dir": false,
+   "mtime": 1709618828,
+   "data": "bGVhZGluZyBkb3QK"
+  },
+  {
+   "path": "Ab",
+   "is_dir": false,
+   "mtime": 1709618889,
+   "data": "YWIK"
+  },
+  {
+   "path": "Hello World.txt",
+   "is_dir": false,
+   "mtime": 1709618950,
+   "data": "c3BhY2UgYW5kIG1peGVkIGNhc2UK"
+  },
+  {
+   "path": "LONGNA~4.TXT",
+   "is_dir": false,
+   "mtime": 1709619011,
+   "data": "bGl0ZXJhbCB0aWxkZSBuYW1lCg=="
+  },
+  {
+   "path": "Long Directory Name",
+   "is_dir": true,
+   "mtime": 1709619072,
+   "data": null
+  },
+  {
+   "path": "NOEXT2",
+   "is_dir": false,
+   "mtime": 1709619194,
+   "data": "dXBwZXIgY2FzZSwgbm8gZXh0ZW5zaW9uCg=="
+  },
+  {
+   "path": "README.TXT",
+   "is_dir": false,
+   "mtime": 1709619255,
+   "data": "cGxhaW4gOC4zIG5hbWUK"
+  },
+  {
+   "path": "Straße.txt",
+   "is_dir": false,
+   "mtime": 1709619316,
+   "data": "cHl0aG9uIHVwcGVyLWNhc2VzIHRoZSBzaGFycCBzIHRvIFNTCg=="
+  },
+  {
+   "path": "a_very_long_file_name_with_many_characters.log",
+   "is_dir": false,
+   "mtime": 1709619377,
+   "data": "Zm91ciBsb25nIG5hbWUgZW50cmllcwo="
+  },
+  {
+   "path": "dir1",
+   "is_dir": true,
+   "mtime": 1709619438,
+   "data": null
+  },
+  {
+   "path": "dots.in.name.txt",
+   "is_dir": false,
+   "mtime": 1709619926,
+   "data": "ZG90cwo="
+  },
+  {
+   "path": "empty.bin",
+   "is_dir": false,
+   "mtime": 1709619987,
+   "data": ""
+  },
+  {
+   "path": "empty_dir",
+   "is_dir": true,
+   "mtime": 1709620048,
+   "data": null
+  },
+  {
+   "path": "exactly13char",
+   "is_dir": false,
+   "mtime": 1709620109,
+   "data": "b25lIGxvbmcgbmFtZSBlbnRyeSB3aXRoIG5vIHRlcm1pbmF0b3IK"
+  },
+  {
+   "path": "exactly26chars_long_name_x",
+   "is_dir": false,
+   "mtime": 1709620170,
+   "data": "dHdvIGxvbmcgbmFtZSBlbnRyaWVzIHdpdGggbm8gdGVybWluYXRvcgo="
+  },
+  {
+   "path": "héllo wörld.txt",
+   "is_dir": false,
+   "mtime": 1709620231,
+   "data": "bGF0aW4tMSBsZXR0ZXJzIHRoYXQgY29kZSBwYWdlIDQzNyBoYXMK"
+  },
+  {
+   "path": "longname1.txt",
+   "is_dir": false,
+   "mtime": 1709620292,
+   "data": "MQo="
+  },
+  {
+   "path": "longname2.txt",
+   "is_dir": false,
+   "mtime": 1709620353,
+   "data": "Mgo="
+  },
+  {
+   "path": "longname3.txt",
+   "is_dir": false,
+   "mtime": 1709620414,
+   "data": "Mwo="
+  },
+  {
+   "path": "longname4.txt",
+   "is_dir": false,
+   "mtime": 1709620475,
+   "data": "NAo="
+  },
+  {
+   "path": "longname5.txt",
+   "is_dir": false,
+   "mtime": 1709620536,
+   "data": "aGFzIHRvIHNraXAgfjQK"
+  },
+  {
+   "path": "noext",
+   "is_dir": false,
+   "mtime": 1709620597,
+   "data": "bG93ZXIgY2FzZSwgbm8gZXh0ZW5zaW9uCg=="
+  },
+  {
+   "path": "onecluster.bin",
+   "is_dir": false,
+   "mtime": 1709620658,
+   "data": "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"
+  },
+  {
+   "path": "read me.txt",
+   "is_dir": false,
+   "mtime": 1709620719,
+   "data": "Y29sbGlkZXMgd2l0aCBSRUFETUUuVFhUIGluIDguMyBmb3JtCg=="
+  },
+  {
+   "path": "x",
+   "is_dir": false,
+   "mtime": 1709620780,
+   "data": "eA=="
+  },
+  {
+   "path": "файл.txt",
+   "is_dir": false,
+   "mtime": 1709620841,
+   "data": "Y3lyaWxsaWMsIG5vdGhpbmcgaW4gY3A0MzcK"
+  },
+  {
+   "path": "ﬁle.txt",
+   "is_dir": false,
+   "mtime": 1709620902,
+   "data": "YW5kIGV4cGFuZHMgdGhlIGZpIGxpZ2F0dXJlCg=="
+  },
+  {
+   "path": "😀 emoji.txt",
+   "is_dir": false,
+   "mtime": 1709620963,
+   "data": "YXN0cmFsIHBsYW5lIGNoYXJhY3Rlcgo="
+  },
+  {
+   "path": "Long Directory Name/inner file.txt",
+   "is_dir": false,
+   "mtime": 1709619133,
+   "data": "aW4gYSBsb25nLW5hbWVkIGRpcmVjdG9yeQo="
+  },
+  {
+   "path": "dir1/inner.txt",
+   "is_dir": false,
+   "mtime": 1709619499,
+   "data": "aW4gZGlyMQo="
+  },
+  {
+   "path": "dir1/sub",
+   "is_dir": true,
+   "mtime": 1709619560,
+   "data": null
+  },
+  {
+   "path": "dir1/sub/also empty",
+   "is_dir": true,
+   "mtime": 1709619621,
+   "data": null
+  },
+  {
+   "path": "dir1/sub/deep",
+   "is_dir": true,
+   "mtime": 1709619682,
+   "data": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper",
+   "is_dir": true,
+   "mtime": 1709619743,
+   "data": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper/deepest",
+   "is_dir": true,
+   "mtime": 1709619804,
+   "data": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper/deepest/file.txt",
+   "is_dir": false,
+   "mtime": 1709619865,
+   "data": "Zml2ZSBsZXZlbHMgZG93bgo="
+  }
+ ],
+ "entries": [
+  {
+   "path": "Ab",
+   "is_dir": false,
+   "size": 3,
+   "sha256": "a63d8014dba891345b30174df2b2a57efbb65b4f9f09b98f245d1b3192277ece"
+  },
+  {
+   "path": "a_very_long_file_name_with_many_characters.log",
+   "is_dir": false,
+   "size": 23,
+   "sha256": "2fb45610d4862b2c4d81c8570ac3cba2641c5b1acd53572e20bbbda7bd589d2a"
+  },
+  {
+   "path": "dir1",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/inner.txt",
+   "is_dir": false,
+   "size": 8,
+   "sha256": "2de4c43367448fdcc6d70c60a47fe63cc6a17770de8b21357ae8fd681abf6650"
+  },
+  {
+   "path": "dir1/sub",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/sub/also empty",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/sub/deep",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper/deepest",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "dir1/sub/deep/deeper/deepest/file.txt",
+   "is_dir": false,
+   "size": 17,
+   "sha256": "efce150288570e9669d4e64ecd63c60debd85f33f091498520f0fb051cc75240"
+  },
+  {
+   "path": "dots.in.name.txt",
+   "is_dir": false,
+   "size": 5,
+   "sha256": "8909d3823a751411b80147fcb8d19e0b517c683aaf43e35fb92cfd53f5c1fb95"
+  },
+  {
+   "path": "empty.bin",
+   "is_dir": false,
+   "size": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "path": "empty_dir",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "exactly13char",
+   "is_dir": false,
+   "size": 39,
+   "sha256": "953b44d10c9fd920a1b3003d731e15dd973aba78eb94bd7eadd65ec213f33bc4"
+  },
+  {
+   "path": "exactly26chars_long_name_x",
+   "is_dir": false,
+   "size": 41,
+   "sha256": "da77808e06febc41b0564286aca24d8c8c95b1ddca20491f72201c12a9737a78"
+  },
+  {
+   "path": "ﬁle.txt",
+   "is_dir": false,
+   "size": 28,
+   "sha256": "090c2b04c64390656bc916939da8951e6b772b0c24ff2b6ee5bb6216d0a55278"
+  },
+  {
+   "path": "Hello World.txt",
+   "is_dir": false,
+   "size": 21,
+   "sha256": "ca29ec1d1142b26397380e9986a2b836fa8a04415d8b198d52cc1a0f471d2b44"
+  },
+  {
+   "path": "héllo wörld.txt",
+   "is_dir": false,
+   "size": 39,
+   "sha256": "b0b7d00b15ed3a9eefaad0e8ea9d410e43265ab2d5aa7fc7d58bd08aeace147e"
+  },
+  {
+   "path": "Long Directory Name",
+   "is_dir": true,
+   "size": 0,
+   "sha256": null
+  },
+  {
+   "path": "Long Directory Name/inner file.txt",
+   "is_dir": false,
+   "size": 26,
+   "sha256": "369407236a9b83895c53dbdafa8e4c476457d3fd9846e314fdecc4a85c872031"
+  },
+  {
+   "path": "longname1.txt",
+   "is_dir": false,
+   "size": 2,
+   "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+  },
+  {
+   "path": "longname2.txt",
+   "is_dir": false,
+   "size": 2,
+   "sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+  },
+  {
+   "path": "longname3.txt",
+   "is_dir": false,
+   "size": 2,
+   "sha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2"
+  },
+  {
+   "path": "longname4.txt",
+   "is_dir": false,
+   "size": 2,
+   "sha256": "7de1555df0c2700329e815b93b32c571c3ea54dc967b89e81ab73b9972b72d1d"
+  },
+  {
+   "path": "LONGNA~4.TXT",
+   "is_dir": false,
+   "size": 19,
+   "sha256": "315d8928c590d809696b3361a37bcaa2e354acb3d244d0cf5ec903364132e8cf"
+  },
+  {
+   "path": "longname5.txt",
+   "is_dir": false,
+   "size": 15,
+   "sha256": "07076b183b98268c73c0a4935e4ea75dea3a9d25abb0b76560754ecbe45a7a19"
+  },
+  {
+   "path": "noext",
+   "is_dir": false,
+   "size": 25,
+   "sha256": "3a99c869e9b55ee9820e29dac37e090ca63a1e4730ceb5432ca2728d5920e1fb"
+  },
+  {
+   "path": "NOEXT2",
+   "is_dir": false,
+   "size": 25,
+   "sha256": "59922785d14510723572c67b5fa7f2bc55eeda381ff2180f1e048fce5a081aee"
+  },
+  {
+   "path": "onecluster.bin",
+   "is_dir": false,
+   "size": 4096,
+   "sha256": "ee69854cf5ff35ee6ed0a071341aad1bbc0ffdd510aaaa9b0d691065a33dacde"
+  },
+  {
+   "path": "README.TXT",
+   "is_dir": false,
+   "size": 15,
+   "sha256": "d87c3969568b59ce2e8b757c8abe333d1316725e809d6bf92515679e8a72eb84"
+  },
+  {
+   "path": "read me.txt",
+   "is_dir": false,
+   "size": 37,
+   "sha256": "64a479846ec13decaa21e2c2760658f49c07832655a99ca3c416bc05272d4986"
+  },
+  {
+   "path": "Straße.txt",
+   "is_dir": false,
+   "size": 37,
+   "sha256": "e7dead33628eb8fd0531a5e9b9862b1448f3669020e905cbc619c1c027d3d4d4"
+  },
+  {
+   "path": "x",
+   "is_dir": false,
+   "size": 1,
+   "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+  },
+  {
+   "path": "😀 emoji.txt",
+   "is_dir": false,
+   "size": 23,
+   "sha256": "bd5407ac3bc5c38a75c1e3aa8e2be2c7b92943c0799dcd62440073e149c44bbf"
+  },
+  {
+   "path": ".hidden",
+   "is_dir": false,
+   "size": 12,
+   "sha256": "90c769b850a3aebaef53a53c17802e6263db46cba8adf24550afb830104cb6c6"
+  },
+  {
+   "path": "файл.txt",
+   "is_dir": false,
+   "size": 27,
+   "sha256": "274d0cb026be9a9bf85b0354128ceb57349e6ed97be52c73290f711c18310111"
+  }
+ ]
+}

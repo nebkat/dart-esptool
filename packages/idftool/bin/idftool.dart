@@ -56,6 +56,11 @@ Future<void> main(List<String> args) async {
     _PrintNvs(),
     _GetNvs(),
     _SetNvs(),
+    _PrintFs(),
+    _ReadFs(),
+    _ExtractFs(),
+    _CreateFs(),
+    _WriteFs(),
   ]) {
     runner.addCommand(c);
   }
@@ -817,4 +822,187 @@ class _PrintBundle extends _Command {
     stdout.writeln('Bundle: $path\n');
     stdout.writeln(await _Command.tableWithApps(table, read));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Filesystems
+// ---------------------------------------------------------------------------
+
+FsType? _fsTypeOption(ArgResults r) {
+  final t = r['type'] as String?;
+  if (t == null) return null;
+  return FsType.byLabel(t) ?? (throw UsageException("Unknown filesystem '$t' (fatfs, littlefs or spiffs)", ''));
+}
+
+void _addFsType(ArgParser p, String help) => p.addOption('type', abbr: 't', help: help);
+
+/// Write a volume's contents under [destination]; refuses paths that escape it.
+void _extractTo(FsVolume volume, String destination) {
+  final root = Directory(destination)..createSync(recursive: true);
+  final rootPath = root.resolveSymbolicLinksSync();
+  for (final e in volume.entries) {
+    final target = File('$rootPath/${e.path}');
+    if (!target.absolute.path.startsWith(rootPath)) throw IdfToolException("Refusing to extract '${e.path}': it escapes $destination");
+    if (e.isDir) {
+      Directory(target.path).createSync(recursive: true);
+    } else {
+      target.parent.createSync(recursive: true);
+      target.writeAsBytesSync(volume.read(e.path));
+    }
+  }
+}
+
+/// Every file under [source] (or the single file) as sources, paths relative
+/// to it.
+List<FsSource> _collect(String source) {
+  final dir = Directory(source);
+  if (dir.existsSync()) {
+    final base = dir.absolute.path.replaceAll(RegExp(r'/$'), '');
+    return [
+      for (final f in dir.listSync(recursive: true, followLinks: false).whereType<File>())
+        (path: f.absolute.path.substring(base.length + 1), bytes: f.readAsBytesSync(), modified: f.lastModifiedSync()),
+    ]..sort((a, b) => a.path.compareTo(b.path));
+  }
+  final file = File(source);
+  if (!file.existsSync()) throw IdfToolException("'$source' does not exist");
+  return [(path: file.uri.pathSegments.last, bytes: file.readAsBytesSync(), modified: file.lastModifiedSync())];
+}
+
+void _warnFs(FsVolume v) {
+  for (final e in v.errors) {
+    stderr.writeln('Warning: $e');
+  }
+}
+
+class _PrintFs extends _Command {
+  @override
+  final name = 'print-fs';
+  @override
+  final description = 'List the contents of a filesystem partition or --file image';
+  _PrintFs() {
+    argParser.addOption('file', abbr: 'f', help: 'Read the filesystem from this image file instead of the device');
+    _addFsType(argParser, 'Filesystem to read (default: from the partition subtype, else detected)');
+  }
+  @override
+  Future<void> run() async {
+    final file = argResults!['file'] as String?;
+    final partitionName = argResults!.rest.firstOrNull;
+    if ((file == null) == (partitionName == null)) throw UsageException('Provide exactly one of a partition name or --file', '');
+    if (file != null) {
+      final image = _readFileArg(file, 'image');
+      final v = FsVolume.mount(image, type: _fsTypeOption(argResults!));
+      _warnFs(v);
+      stdout.writeln("'$file': ${v.type.label}, ${hex(image.length)} bytes\n${formatFsListing(v.entries)}");
+      return;
+    }
+    await withDevice((device, _) async {
+      final (partition: p, volume: v) = await device.readFs(name: partitionName, type: _fsTypeOption(argResults!), onProgress: progress);
+      _warnFs(v);
+      stdout.writeln("Partition '${p.name}': ${v.type.label}, ${hex(p.size)} bytes\n${formatFsListing(v.entries)}");
+    });
+  }
+}
+
+class _ReadFs extends _Command {
+  @override
+  final name = 'read-fs';
+  @override
+  final description = 'Read a filesystem partition and extract it to a directory: PARTITION DESTINATION';
+  _ReadFs() {
+    _addFsType(argParser, 'Filesystem to read (default: from the partition subtype, else detected)');
+  }
+  @override
+  Future<void> run() => withDevice((device, _) async {
+        final partitionName = _arg(argResults!, 0, 'partition');
+        final dest = _arg(argResults!, 1, 'destination');
+        final (partition: p, volume: v) = await device.readFs(name: partitionName, type: _fsTypeOption(argResults!), onProgress: progress);
+        _warnFs(v);
+        _extractTo(v, dest);
+        stdout.writeln(formatFsListing(v.entries));
+        stderr.writeln("Extracted ${v.type.label} partition '${p.name}' to '$dest'");
+      });
+}
+
+class _ExtractFs extends _Command {
+  @override
+  final name = 'extract-fs';
+  @override
+  final description = 'Extract a filesystem image file to a directory: IMAGE DESTINATION';
+  _ExtractFs() {
+    _addFsType(argParser, 'Filesystem to read (default: detected from the image)');
+  }
+  @override
+  Future<void> run() async {
+    final path = _arg(argResults!, 0, 'image file');
+    final dest = _arg(argResults!, 1, 'destination');
+    final v = FsVolume.mount(_readFileArg(path, 'image'), type: _fsTypeOption(argResults!));
+    _warnFs(v);
+    _extractTo(v, dest);
+    stdout.writeln(formatFsListing(v.entries));
+    stderr.writeln("Extracted ${v.type.label} image '$path' to '$dest'");
+  }
+}
+
+class _CreateFs extends _Command {
+  @override
+  final name = 'create-fs';
+  @override
+  final description = 'Build a filesystem image from a directory: SOURCE OUTPUT';
+  _CreateFs() {
+    _addFsType(argParser, 'Filesystem to build (default: from --partition)');
+    argParser.addOption('size', help: 'Image size in bytes (e.g. 0x40000)');
+    argParser.addOption('partition', help: 'Partition to take the size and type from (--partition-table-file)');
+  }
+  @override
+  Future<void> run() async {
+    final source = _arg(argResults!, 0, 'source directory');
+    final out = _arg(argResults!, 1, 'output file');
+    PartitionDefinition? partition;
+    if (argResults!['partition'] != null) {
+      final table = tableFromFile(null) ?? (throw UsageException('--partition needs --partition-table-file', ''));
+      partition = table.findByName(argResults!['partition'] as String) ??
+          (throw IdfToolException("No partition named '${argResults!['partition']}'"));
+    }
+    final size = argResults!['size'] != null ? _int(argResults!['size'] as String, what: 'size') : partition?.size ?? (throw UsageException('Pass --size or --partition', ''));
+    final type = FsType.resolve(explicit: _fsTypeOption(argResults!), partition: partition);
+    final image = createFs(type, _collect(source), size);
+    File(out).writeAsBytesSync(image);
+    final v = FsVolume.mount(image, type: type);
+    stdout.writeln(formatFsListing(v.entries));
+    stderr.writeln('Wrote ${type.label} image (${hex(image.length)} bytes) to $out');
+  }
+}
+
+class _WriteFs extends _Command {
+  @override
+  final name = 'write-fs';
+  @override
+  final description = 'Build a filesystem image from a directory (or take a prebuilt image) and flash it: PARTITION SOURCE';
+  _WriteFs() {
+    _addFsType(argParser, 'Filesystem to build (default: from the partition subtype)');
+  }
+  @override
+  Future<void> run() => withDevice((device, _) async {
+        final partitionName = _arg(argResults!, 0, 'partition');
+        final source = _arg(argResults!, 1, 'source');
+        final partition = await device.fsPartition(partitionName);
+        final type = FsType.resolve(explicit: _fsTypeOption(argResults!), partition: partition, what: "'$source'");
+        Uint8List image;
+        if (Directory(source).existsSync()) {
+          image = createFs(type, _collect(source), partition.size);
+        } else {
+          final data = _readFileArg(source, 'source');
+          if (FsType.detect(data) == type) {
+            if (data.length < partition.size) {
+              stderr.writeln('Warning: image is ${hex(data.length)} bytes, smaller than partition '
+                  "'${partition.name}' (${hex(partition.size)}) — it was built for a different size and may not mount");
+            }
+            image = data;
+          } else {
+            image = createFs(type, _collect(source), partition.size);
+          }
+        }
+        stdout.writeln(formatFsListing(FsVolume.mount(image, type: type).entries));
+        reportWrite(partition.name, await device.writeFs(image, partitionName: partition.name, strategy: strategy, onProgress: progress));
+      });
 }
