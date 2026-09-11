@@ -1,0 +1,16 @@
+name: esptool_libserialport
+description: EspTransport over package:libserialport for desktop CLIs.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  esptool: ^0.3.0
+  ffi: ^2.1.3
+  libserialport: ^0.3.0+1
+
+dev_dependencies:
+  lints: ^4.0.0

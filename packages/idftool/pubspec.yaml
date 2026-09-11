@@ -1,0 +1,21 @@
+name: idftool
+description: Port of python idftool — partition tables, NVS, OTA, differential flashing and bundles for ESP-IDF devices.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  archive: ^4.0.0
+  args: ^2.6.0
+  collection: ^1.18.0
+  crypto: ^3.0.6
+  esptool: ^0.3.0
+  esptool_libserialport: ^0.1.0
+  meta: ^1.15.0
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.24.0

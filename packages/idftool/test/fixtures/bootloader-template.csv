@@ -1,0 +1,7 @@
+# A partition table with a primary bootloader row whose offset is blank (a portable "template").
+# Loading it should require --primary-bootloader-offset, and idftool should say so clearly.
+# Name,     Type,            SubType,  Offset,    Size,     Flags
+bootloader, bootloader,      primary,  ,          0x8000,
+part_table, partition_table, primary,  0x8000,    0x1000,
+nvs,        data,            nvs,      0x9000,    0x6000,
+factory,    app,             factory,  0x20000,   0x100000,

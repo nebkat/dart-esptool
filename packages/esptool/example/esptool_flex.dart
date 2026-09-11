@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:esptool/esptool.dart';
 
-import 'libserialport_transport.dart';
+import 'package:esptool_libserialport/esptool_libserialport.dart';
 
 /// A small CLI that exercises the [EspLoader] over a real serial port via
 /// `package:libserialport`.

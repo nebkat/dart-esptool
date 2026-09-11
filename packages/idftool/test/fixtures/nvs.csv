@@ -1,0 +1,6 @@
+# Basic NVS contents (esp-idf nvs_partition_gen format) for idftool create-nvs / write-nvs tests.
+key,type,encoding,value
+storage,namespace,,
+device_id,data,u32,12345
+device_name,data,string,idftool-test
+counter,data,u16,7
