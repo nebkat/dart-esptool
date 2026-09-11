@@ -211,9 +211,9 @@ class _NvsPageState extends State<NvsPage> {
                   ],
                   rows: [
                     for (final entry in _sortedEntries(image))
-                      _row(entry: entry, pending: pending['${entry.namespace}:${entry.key}'], busy: busy),
+                      _row(entry: entry, pending: pending['${entry.namespace}:${entry.key}'], busy: busy, valueWidth: _valueWidth(constraints.maxWidth)),
                     for (final edit in _edits.where((e) => !e.isDelete && image.get(e.namespace, e.key) == null))
-                      _row(pending: edit, busy: busy),
+                      _row(pending: edit, busy: busy, valueWidth: _valueWidth(constraints.maxWidth)),
                   ],
                 ),
               ),
@@ -223,6 +223,10 @@ class _NvsPageState extends State<NvsPage> {
       ],
     ]);
   }
+
+  /// The value column gets whatever the fixed columns (namespace, key, type,
+  /// actions, spacing and card padding) leave over.
+  static double _valueWidth(double tableWidth) => (tableWidth - 640).clamp(240, double.infinity);
 
   /// Entries in namespace order of first appearance, keys sorted within.
   List<NvsEntry> _sortedEntries(NvsImage image) {
@@ -237,7 +241,7 @@ class _NvsPageState extends State<NvsPage> {
       });
   }
 
-  DataRow _row({NvsEntry? entry, NvsEdit? pending, required bool busy}) {
+  DataRow _row({NvsEntry? entry, NvsEdit? pending, required bool busy, required double valueWidth}) {
     final theme = Theme.of(context);
     final deleted = pending?.isDelete ?? false;
     final changed = pending != null && !deleted;
@@ -257,7 +261,7 @@ class _NvsPageState extends State<NvsPage> {
         DataCell(TypeChip(namespace, colorForName(namespace))),
         DataCell(Text(key, style: style)),
         DataCell(type == null ? const SizedBox.shrink() : TypeChip(type.label, _nvsTypeColor(type))),
-        DataCell(Text(valueText, style: style, overflow: TextOverflow.ellipsis, maxLines: 1)),
+        DataCell(SizedBox(width: valueWidth, child: Text(valueText, style: style, overflow: TextOverflow.ellipsis, maxLines: 1))),
         DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
             tooltip: 'Edit',
