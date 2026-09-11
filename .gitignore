@@ -9,3 +9,9 @@ pubspec.lock
 # Android Studio
 *.iml
 .idea/
+
+# fvm
+.fvm/
+
+# macOS
+.DS_Store
