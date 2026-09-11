@@ -9,11 +9,13 @@ import 'package:esptool_libserialport/esptool_libserialport.dart';
 /// `package:libserialport`.
 ///
 /// Usage:
+/// ```
 ///   dart run example/esptool_flex.dart                       # list ports
 ///   dart run example/esptool_flex.dart <port>                # chip info
 ///   dart run example/esptool_flex.dart <port> read  <addr> <len> <out.bin>
 ///   dart run example/esptool_flex.dart <port> write <addr> <in.bin>
 ///   dart run example/esptool_flex.dart <port> erase <addr> <len>
+/// ```
 ///
 /// Addresses/lengths accept `0x`-prefixed hex or decimal, e.g. `0x1000`.
 Future<void> main(List<String> args) async {

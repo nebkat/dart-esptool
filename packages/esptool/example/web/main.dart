@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:esptool/esptool.dart';
 import 'package:web/web.dart' as web;
 
-import 'web_serial_transport.dart';
+import 'package:esptool/web.dart';
 
 final _log = web.document.getElementById('log') as web.HTMLPreElement;
 final _portSelect = web.document.getElementById('port') as web.HTMLSelectElement;

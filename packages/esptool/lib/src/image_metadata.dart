@@ -262,4 +262,4 @@ enum ChipId {
   final int value;
 }
 
-_digestToString(Uint8List digest) => digest.map((e) => e.toRadixString(16).padLeft(2, "0")).join("");
+String _digestToString(Uint8List digest) => digest.map((e) => e.toRadixString(16).padLeft(2, "0")).join("");

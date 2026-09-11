@@ -1,9 +1,14 @@
+/// Web Serial transport for [EspLoader] — import as `package:esptool/web.dart`
+/// from browser code only (it depends on `dart:js_interop`).
+library;
+
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:esptool/esptool.dart';
 import 'package:web/web.dart' as web;
+
+import 'esptool.dart';
 
 /// `navigator.serial`, or `null` where the Web Serial API is unavailable
 /// (non-Chromium browsers, or an insecure origin — it needs https/localhost).
