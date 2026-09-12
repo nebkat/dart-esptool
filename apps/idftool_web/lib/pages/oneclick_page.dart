@@ -7,6 +7,7 @@ import 'package:idftool/idftool.dart';
 
 import '../session/device_session.dart';
 import '../util/files.dart';
+import '../widgets/port_item.dart';
 
 /// The one-click flasher: a bundle (from `?bundle=<url>` or a picked file),
 /// an outline of what it will do, Connect, Flash, done. None of the tool's
@@ -238,7 +239,12 @@ class _OneClickPageState extends State<OneClickPage> {
           if (session.ports.length > 1)
             DropdownButton<SerialPort>(
               value: session.selectedPort,
-              items: [for (final p in session.ports) DropdownMenuItem(value: p, child: Text(session.labelFor(p)))],
+              itemHeight: null,
+              items: [
+                for (final p in session.ports)
+                  DropdownMenuItem(value: p, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: PortItem(session: session, port: p))),
+              ],
+              selectedItemBuilder: (context) => [for (final p in session.ports) Align(alignment: Alignment.centerLeft, child: portSummary(session, p))],
               onChanged: session.busy ? null : session.selectPort,
             ),
           if (session.ports.isNotEmpty) TextButton(onPressed: session.busy ? null : session.requestPort, child: const Text('Choose another port…')),

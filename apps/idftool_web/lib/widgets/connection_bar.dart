@@ -2,6 +2,7 @@ import 'package:esptool/web.dart';
 import 'package:flutter/material.dart';
 
 import '../session/device_session.dart';
+import 'port_item.dart';
 
 /// The always-visible connection bar: port, reset strategy, stub toggle and
 /// connect/disconnect, so any page can (re)connect.
@@ -34,12 +35,19 @@ class ConnectionBar extends StatelessWidget {
                       labelText: 'Port',
                       border: OutlineInputBorder(),
                       isDense: true),
+                  itemHeight: null,
                   items: [
                     for (final p in session.ports)
                       DropdownMenuItem(
                           value: p,
-                          child: Text(session.labelFor(p),
-                              overflow: TextOverflow.ellipsis)),
+                          child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: PortItem(session: session, port: p))),
+                  ],
+                  // The closed field is one line tall; show the label flat there.
+                  selectedItemBuilder: (context) => [
+                    for (final p in session.ports)
+                      Align(alignment: Alignment.centerLeft, child: portSummary(session, p)),
                   ],
                   onChanged: locked ? null : session.selectPort,
                   hint: const Text('No port granted'),
