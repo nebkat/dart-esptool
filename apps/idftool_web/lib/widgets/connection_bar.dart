@@ -38,7 +38,7 @@ class ConnectionBar extends StatelessWidget {
                     for (final p in session.ports)
                       DropdownMenuItem(
                           value: p,
-                          child: Text(DeviceSession.describePort(p),
+                          child: Text(session.labelFor(p),
                               overflow: TextOverflow.ellipsis)),
                   ],
                   onChanged: locked ? null : session.selectPort,
@@ -49,6 +49,14 @@ class ConnectionBar extends StatelessWidget {
                 onPressed: locked ? null : session.requestPort,
                 icon: const Icon(Icons.usb),
                 label: const Text('Add port…'),
+              ),
+              Tooltip(
+                message: 'Connect briefly to every granted port to learn its chip and MAC (each device is reset)',
+                child: OutlinedButton.icon(
+                  onPressed: session.busy || session.ports.isEmpty ? null : session.identifyAll,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Identify all'),
+                ),
               ),
               SizedBox(
                 width: 240,

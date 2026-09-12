@@ -22,6 +22,22 @@ enum ResetChoice {
 
 enum SessionState { disconnected, connecting, connected, busy }
 
+/// What probing a port found — python idftool's `probe_port` record.
+class PortIdentity {
+  const PortIdentity({this.chip, this.mac, this.error});
+  final EspChip? chip;
+  final String? mac;
+
+  /// Why the port couldn't be identified (busy, no response, ...).
+  final String? error;
+
+  String get label => error != null
+      ? 'unavailable: $error'
+      : chip == null
+          ? 'unidentified'
+          : [chip!.name, if (mac != null) mac!].join(' · ');
+}
+
 class LogLine {
   LogLine(this.message, {this.error = false}) : time = DateTime.now();
   final DateTime time;
@@ -74,6 +90,18 @@ class DeviceSession extends ChangeNotifier {
 
   final List<LogLine> log = [];
 
+  /// What each granted port turned out to be, learned by connecting to it or
+  /// by [identifyAll]. Web Serial hides the OS path, so this is the only way
+  /// to tell two identical adapters apart.
+  final Map<SerialPort, PortIdentity> identities = {};
+  bool _identifying = false;
+
+  /// [describePort] plus whatever [identities] knows about it.
+  String labelFor(SerialPort port) {
+    final id = identities[port];
+    return id == null ? describePort(port) : '${describePort(port)} — ${id.label}';
+  }
+
   /// Changes queued for the connected device (see [FlashPlan]).
   final FlashPlan plan = FlashPlan();
 
@@ -82,7 +110,7 @@ class DeviceSession extends ChangeNotifier {
   /// The idftool device layer over [loader], while connected.
   IdfDevice? get device => _device;
   bool get connected => state == SessionState.connected || state == SessionState.busy;
-  bool get busy => state == SessionState.busy || state == SessionState.connecting;
+  bool get busy => state == SessionState.busy || state == SessionState.connecting || _identifying;
 
   void _onPortsChanged(web.Event _) => refreshPorts();
 
@@ -169,14 +197,7 @@ class DeviceSession extends ChangeNotifier {
       final loader = EspLoader(transport, usbOtg: usbOtg);
       _loader = loader;
 
-      final strategies = switch (reset) {
-        ResetChoice.auto => _isNativeUsb(port)
-            ? [(EspResets.usbJtag(), 'USB-JTAG'), (EspResets.classic(), 'classic')]
-            : [(EspResets.classic(), 'classic'), (EspResets.usbJtag(), 'USB-JTAG')],
-        ResetChoice.usbJtag => [(EspResets.usbJtag(), 'USB-JTAG')],
-        ResetChoice.classic => [(EspResets.classic(), 'classic')],
-        ResetChoice.none => [(EspResets.none, 'no')],
-      };
+      final strategies = _strategies(port);
       EspChip? detected;
       Object? lastError;
       for (final (strategy, name) in strategies) {
@@ -208,6 +229,7 @@ class DeviceSession extends ChangeNotifier {
         await loader.runStub();
       }
       mac = await loader.readMac();
+      identities[port] = PortIdentity(chip: detected, mac: macString);
       final id = await loader.flashId();
       flashId = _hex(id, 6);
       addLog('Connected: ${detected.name}, ${flashSize == null ? 'unknown flash size' : _mb(flashSize!)} flash, '
@@ -222,7 +244,70 @@ class DeviceSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? get macString => mac?.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+  String? get macString => _formatMac(mac);
+  static String? _formatMac(Uint8List? mac) => mac?.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+
+  List<(EspReset, String)> _strategies(SerialPort port) => switch (reset) {
+        ResetChoice.auto => _isNativeUsb(port)
+            ? [(EspResets.usbJtag(), 'USB-JTAG'), (EspResets.classic(), 'classic')]
+            : [(EspResets.classic(), 'classic'), (EspResets.usbJtag(), 'USB-JTAG')],
+        ResetChoice.usbJtag => [(EspResets.usbJtag(), 'USB-JTAG')],
+        ResetChoice.classic => [(EspResets.classic(), 'classic')],
+        ResetChoice.none => [(EspResets.none, 'no')],
+      };
+
+  /// Probe every granted port that isn't the live connection: reset into the
+  /// bootloader, read chip and MAC, reset back into the app. Like python
+  /// idftool's device picker, this reboots each device it touches.
+  Future<void> identifyAll() async {
+    if (_identifying || busy) return;
+    _identifying = true;
+    notifyListeners();
+    try {
+      for (final port in List.of(ports)) {
+        if (connected && port == selectedPort) continue;
+        identities[port] = await _probe(port);
+        addLog('${describePort(port)}: ${identities[port]!.label}');
+        notifyListeners();
+      }
+    } finally {
+      _identifying = false;
+      notifyListeners();
+    }
+  }
+
+  Future<PortIdentity> _probe(SerialPort port) async {
+    WebSerialTransport? transport;
+    try {
+      transport = await WebSerialTransport.open(port);
+    } catch (e) {
+      return PortIdentity(error: '$e'.contains('Failed to open') ? 'port is in use' : '$e');
+    }
+    final loader = EspLoader(transport);
+    try {
+      EspChip? chip;
+      for (final (strategy, _) in _strategies(port)) {
+        try {
+          chip = await loader.connect(reset: strategy, attempts: 2).timeout(const Duration(seconds: 8));
+          break;
+        } catch (_) {}
+      }
+      if (chip == null) return const PortIdentity(error: 'no response — not an ESP, or not resettable');
+      String? mac;
+      try {
+        mac = _formatMac(await loader.readMac());
+      } catch (_) {}
+      try {
+        await loader.hardReset().timeout(const Duration(seconds: 3));
+      } catch (_) {}
+      return PortIdentity(chip: chip, mac: mac);
+    } finally {
+      await loader.dispose();
+      try {
+        await transport.close().timeout(const Duration(seconds: 3));
+      } catch (_) {}
+    }
+  }
 
   /// Close the port, optionally rebooting the chip into its application first.
   Future<void> disconnect({bool hardReset = true}) async {

@@ -492,11 +492,59 @@ class _Devices extends _Command {
   @override
   final name = 'devices';
   @override
-  final description = 'List serial ports';
+  final description = 'List serial ports; with --identify, connect to each and report chip and MAC (resets them)';
+  _Devices() {
+    argParser.addFlag('identify', abbr: 'i', negatable: false, help: 'Probe each port for an ESP chip and its MAC');
+  }
   @override
   Future<void> run() async {
-    for (final p in LibSerialPortTransport.availablePorts) {
-      stdout.writeln(p);
+    final ports = LibSerialPortTransport.availablePorts;
+    if (!(argResults!['identify'] as bool)) {
+      ports.forEach(stdout.writeln);
+      return;
+    }
+    final rows = <(String, String, String)>[];
+    for (final port in ports) {
+      if (!port.contains('usb') && !port.contains('ACM') && !port.contains('COM')) continue;
+      final (what, detail) = await _probe(port);
+      rows.add((port, what, detail));
+    }
+    final w0 = rows.fold(0, (n, r) => r.$1.length > n ? r.$1.length : n);
+    final w1 = rows.fold(0, (n, r) => r.$2.length > n ? r.$2.length : n);
+    for (final (port, what, detail) in rows) {
+      stdout.writeln('${port.padRight(w0)}   ${what.padRight(w1)}   $detail'.trimRight());
+    }
+  }
+
+  /// `(what, detail)` for [port] — python idftool's `probe_port`/`device_fields`.
+  Future<(String, String)> _probe(String port) async {
+    final LibSerialPortTransport transport;
+    try {
+      transport = LibSerialPortTransport.open(port, baudRate: 115200);
+    } catch (e) {
+      // EBUSY (16) or EAGAIN (35): another process has the port open.
+      return ('Unavailable', RegExp(r'errno = (16|35)\b').hasMatch('$e') ? 'port is in use' : '$e');
+    }
+    final loader = EspLoader(transport);
+    try {
+      final nativeUsb = port.contains('usbmodem') || port.contains('ttyACM');
+      EspChip? chip;
+      for (final reset in nativeUsb ? [EspResets.usbJtag(), EspResets.classic()] : [EspResets.classic(), EspResets.usbJtag()]) {
+        try {
+          chip = await loader.connect(reset: reset, attempts: 2);
+          break;
+        } on EspException catch (_) {}
+      }
+      if (chip == null) return ('Unidentified', 'no response');
+      String mac = '';
+      try {
+        mac = (await loader.readMac()).map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+      } catch (_) {}
+      await loader.hardReset();
+      return (chip.name, mac);
+    } finally {
+      await loader.dispose();
+      transport.close();
     }
   }
 }

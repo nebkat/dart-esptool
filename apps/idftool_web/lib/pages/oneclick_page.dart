@@ -238,7 +238,7 @@ class _OneClickPageState extends State<OneClickPage> {
           if (session.ports.length > 1)
             DropdownButton<SerialPort>(
               value: session.selectedPort,
-              items: [for (final p in session.ports) DropdownMenuItem(value: p, child: Text(DeviceSession.describePort(p)))],
+              items: [for (final p in session.ports) DropdownMenuItem(value: p, child: Text(session.labelFor(p)))],
               onChanged: session.busy ? null : session.selectPort,
             ),
           if (session.ports.isNotEmpty) TextButton(onPressed: session.busy ? null : session.requestPort, child: const Text('Choose another port…')),
