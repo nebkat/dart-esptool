@@ -1,0 +1,49 @@
+# Publishes apps/idftool_web to GitHub Pages on every push to main.
+#
+# The app is static: Web Serial needs HTTPS, which Pages provides, and the
+# one-click flasher fetches bundles from wherever `#/oneclick?bundle=<url>`
+# points (that host needs CORS), so no firmware lives here.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.2
+          cache: true
+      - run: flutter pub get
+      # Served under /<repo>/, so the base href must match.
+      - run: flutter build web --release --base-href "/${GITHUB_REPOSITORY#*/}/"
+        working-directory: apps/idftool_web
+      # Pages has no rewrite rules; a 404 that is the app keeps deep links working.
+      - run: cp apps/idftool_web/build/web/index.html apps/idftool_web/build/web/404.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/idftool_web/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
