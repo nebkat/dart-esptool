@@ -302,8 +302,17 @@ class DeviceSession extends ChangeNotifier {
   /// Progress callback for the running operation (an idftool [ProgressCallback]).
   void reportProgress(String label, int done, int total) {
     progress = Progress(label, done, total);
-    notifyListeners();
+    // Repainting the whole app on every 4 KiB frame starves the serial read
+    // loop; a native-USB chip then drops bytes. Coalesce to ~15 Hz, but
+    // always show the final state.
+    final now = DateTime.now();
+    if (done >= total || _lastProgressNotify == null || now.difference(_lastProgressNotify!).inMilliseconds >= 66) {
+      _lastProgressNotify = now;
+      notifyListeners();
+    }
   }
+
+  DateTime? _lastProgressNotify;
 
   @override
   void dispose() {

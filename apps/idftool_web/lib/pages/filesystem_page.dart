@@ -13,8 +13,11 @@ import '../widgets/type_chip.dart';
 /// tree of files, view/download, extract everything as a ZIP, and replace
 /// the partition from an image or (SPIFFS/FAT) a ZIP of files.
 class FilesystemPage extends StatefulWidget {
-  const FilesystemPage({super.key, required this.session});
+  const FilesystemPage({super.key, required this.session, this.initialPartition});
   final DeviceSession session;
+
+  /// The filesystem partition to open first, by name (the first one if `null`).
+  final String? initialPartition;
 
   @override
   State<FilesystemPage> createState() => _FilesystemPageState();
@@ -29,6 +32,12 @@ class _FilesystemPageState extends State<FilesystemPage> {
   FsType? _typeOverride;
   bool _loadedFor = false;
   final _collapsed = <String>{};
+
+  /// The file shown in the right-hand pane, its bytes, and whether it is
+  /// shown as hex (`null` = decide from the content).
+  FsEntry? _selected;
+  Uint8List? _selectedBytes;
+  bool? _hex;
 
   DeviceSession get session => widget.session;
 
@@ -46,7 +55,8 @@ class _FilesystemPageState extends State<FilesystemPage> {
     await session.runDevice('Read filesystem', (device) async {
       final table = await device.partitionTable();
       final partitions = table.where((p) => FsType.forPartition(p) != null).toList();
-      final partition = _partition != null && partitions.contains(_partition) ? _partition : partitions.firstOrNull;
+      final wanted = _partition?.name ?? widget.initialPartition;
+      final partition = partitions.where((p) => p.name == wanted).firstOrNull ?? partitions.firstOrNull;
       if (partition == null) throw IdfToolException('No filesystem partition in the partition table');
       final (partition: _, volume: volume) =
           await device.readFs(name: partition.name, type: _typeOverride, onProgress: session.reportProgress);
@@ -62,6 +72,8 @@ class _FilesystemPageState extends State<FilesystemPage> {
           _sourceLabel = "partition '${partition.name}'";
           _imageSize = partition.size;
           _collapsed.clear();
+          _selected = null;
+          _selectedBytes = null;
         });
       }
     });
@@ -80,6 +92,8 @@ class _FilesystemPageState extends State<FilesystemPage> {
         _sourceLabel = file.name;
         _imageSize = file.bytes.length;
         _collapsed.clear();
+        _selected = null;
+        _selectedBytes = null;
       });
     } catch (e) {
       session.addLog('Could not mount ${file.name}: $e', error: true);
@@ -133,17 +147,30 @@ class _FilesystemPageState extends State<FilesystemPage> {
     await _load();
   }
 
-  Future<void> _view(FsEntry e) async {
-    final bytes = _volume!.read(e.path);
-    String text;
+  void _select(FsEntry e) {
+    Uint8List? bytes;
     try {
-      text = utf8.decode(bytes);
-      if (text.codeUnits.any((c) => c < 9 || (c > 13 && c < 32))) throw const FormatException();
-    } on FormatException {
-      text = _hexDump(bytes);
+      bytes = _volume!.read(e.path);
+    } catch (err) {
+      session.addLog('Could not read ${e.path}: $err', error: true);
     }
-    if (!mounted) return;
-    await showText(context, title: '${e.path} (${e.size.bytesString})', text: text);
+    setState(() {
+      _selected = e;
+      _selectedBytes = bytes;
+      _hex = null;
+    });
+  }
+
+  /// Text if it decodes as UTF-8 without control characters (tabs and
+  /// newlines aside); otherwise it's binary and shown as hex.
+  static bool _looksLikeText(Uint8List bytes) {
+    if (bytes.isEmpty) return true;
+    try {
+      final text = utf8.decode(bytes);
+      return !text.codeUnits.any((c) => c < 9 || (c > 13 && c < 32) || c == 127);
+    } on FormatException {
+      return false;
+    }
   }
 
   static String _hexDump(Uint8List data) {
@@ -164,8 +191,8 @@ class _FilesystemPageState extends State<FilesystemPage> {
     final busy = session.busy;
     final theme = Theme.of(context);
     final canBuild = _partition != null && (FsType.forPartition(_partition!) ?? _typeOverride) != FsType.littlefs;
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), child: Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (session.connected) ...[
           if (_fsPartitions.length > 1)
             DropdownButton<PartitionDefinition>(
@@ -216,24 +243,84 @@ class _FilesystemPageState extends State<FilesystemPage> {
             label: Text(canBuild ? 'Replace from ZIP of files…' : 'Replace from ZIP (LittleFS build not supported)'),
           ),
         ],
-      ]),
-      const SizedBox(height: 12),
+      ])),
+      const SizedBox(height: 8),
       if (volume == null)
-        Padding(
-          padding: const EdgeInsets.all(24),
+        Expanded(
           child: Center(child: Text(session.connected ? 'Reading…' : 'Connect to a device, or open a filesystem image file.')),
         )
       else ...[
-        Row(children: [
-          TypeChip(volume.type.label, _fsColor(volume.type)),
-          const SizedBox(width: 8),
-          Text('${_sourceLabel ?? ''}: ${volume.describe()}, ${_imageSize?.bytesString ?? ''} · '
-              '${volume.entries.where((e) => !e.isDir).length} files, '
-              '${volume.entries.where((e) => !e.isDir).fold(0, (n, e) => n + e.size).bytesString}'),
-        ]),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(children: [
+            TypeChip(volume.type.label, _fsColor(volume.type)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('${_sourceLabel ?? ''}: ${volume.describe()}, ${_imageSize?.bytesString ?? ''} · '
+                  '${volume.entries.where((e) => !e.isDir).length} files, '
+                  '${volume.entries.where((e) => !e.isDir).fold(0, (n, e) => n + e.size).bytesString}'),
+            ),
+          ]),
+        ),
         const SizedBox(height: 8),
-        Card(child: _tree(volume, busy)),
+        Expanded(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Browser on the left, viewer on the right; each scrolls on its own.
+            SizedBox(
+              width: 420,
+              child: Card(
+                margin: const EdgeInsets.fromLTRB(16, 0, 8, 12),
+                child: SingleChildScrollView(child: _tree(volume, busy)),
+              ),
+            ),
+            Expanded(
+              child: Card(margin: const EdgeInsets.fromLTRB(8, 0, 16, 12), child: _viewer(volume)),
+            ),
+          ]),
+        ),
       ],
+    ]);
+  }
+
+  Widget _viewer(FsVolume volume) {
+    final e = _selected;
+    final bytes = _selectedBytes;
+    final theme = Theme.of(context);
+    if (e == null || bytes == null) {
+      return const Center(child: Text('Select a file to view it.'));
+    }
+    final asHex = _hex ?? !_looksLikeText(bytes);
+    final text = asHex ? _hexDump(bytes) : utf8.decode(bytes, allowMalformed: true);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+        child: Row(children: [
+          Expanded(
+            child: Text('${e.path}  ·  ${e.size.bytesString}',
+                style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13), overflow: TextOverflow.ellipsis),
+          ),
+          SegmentedButton<bool>(
+            segments: const [ButtonSegment(value: false, label: Text('Text')), ButtonSegment(value: true, label: Text('Hex'))],
+            selected: {asHex},
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            onSelectionChanged: (v) => setState(() => _hex = v.first),
+          ),
+          IconButton(tooltip: 'Download', icon: const Icon(Icons.download, size: 20), onPressed: () => saveBytes(e.name, bytes)),
+        ]),
+      ),
+      const Divider(height: 1),
+      Expanded(
+        child: SelectionArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Text(text, style: TextStyle(fontFamily: 'RobotoMono', fontSize: 12, color: theme.colorScheme.onSurface)),
+            ),
+          ),
+        ),
+      ),
     ]);
   }
 
@@ -270,12 +357,14 @@ class _FilesystemPageState extends State<FilesystemPage> {
     final rows = <Widget>[];
     for (final e in all.where((e) => !hidden(e))) {
       final depth = '/'.allMatches(e.path).length;
+      final selected = !e.isDir && _selected?.path == e.path;
       rows.add(InkWell(
         onTap: e.isDir
             ? () => setState(() => _collapsed.contains(e.path) ? _collapsed.remove(e.path) : _collapsed.add(e.path))
-            : () => _view(e),
-        child: Padding(
-          padding: EdgeInsets.only(left: 12.0 + depth * 20, right: 8, top: 2, bottom: 2),
+            : () => _select(e),
+        child: Container(
+          color: selected ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4) : null,
+          padding: EdgeInsets.only(left: 12.0 + depth * 20, right: 8, top: 3, bottom: 3),
           child: Row(children: [
             Icon(
               e.isDir ? (_collapsed.contains(e.path) ? Icons.folder : Icons.folder_open) : Icons.insert_drive_file_outlined,
@@ -283,23 +372,14 @@ class _FilesystemPageState extends State<FilesystemPage> {
               color: e.isDir ? Colors.amber : null,
             ),
             const SizedBox(width: 8),
-            Expanded(child: Text(e.name, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13))),
-            if (!e.isDir) ...[
-              SizedBox(width: 110, child: Text(e.size.bytesString, textAlign: TextAlign.right, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13))),
-              if (e.modified != null)
-                SizedBox(width: 160, child: Text(e.modified.toString().substring(0, 16), textAlign: TextAlign.right, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 12))),
-              IconButton(
-                tooltip: 'Download',
-                icon: const Icon(Icons.download, size: 18),
-                onPressed: () => saveBytes(e.name, volume.read(e.path)),
-              ),
-            ] else
-              const SizedBox(width: 48),
+            Expanded(child: Text(e.name, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13), overflow: TextOverflow.ellipsis)),
+            if (!e.isDir)
+              Text(e.size.bytesString, style: TextStyle(fontFamily: 'RobotoMono', fontSize: 12, color: Theme.of(context).hintColor)),
           ]),
         ),
       ));
     }
     if (rows.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('(empty)'));
-    return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Column(children: rows));
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows));
   }
 }

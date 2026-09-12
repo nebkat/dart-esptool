@@ -624,29 +624,62 @@ class EspLoader {
 
   /// Stub `READ_FLASH`: the stub pushes [flashSectorSize] frames, we ack each
   /// with the running byte count, and it finishes with a 16-byte MD5.
+  ///
+  /// A frame can arrive short: a native-USB chip's USB-Serial/JTAG peripheral
+  /// drops TX bytes when the host stops pulling for a while (a busy browser
+  /// tab is enough), and there is no way to ask the stub to resend
+  /// mid-transfer. So the transfer is always run to completion — every frame
+  /// acked, the digest consumed — and the sectors that came up short are
+  /// then fetched again one by one with fresh `READ_FLASH` commands, before
+  /// the assembled data is checked against the stub's digest.
   Future<Uint8List> _readFlashStub(int offset, int length, void Function(int, int)? onProgress) async {
+    final out = Uint8List(length);
+    final bad = <int>[]; // offsets (within the region) of sectors that arrived short
+    final digest = await _readFlashStream(offset, length, (at, frame) {
+      out.setRange(at, at + frame.length, frame);
+      if (at + frame.length < length && frame.length < flashSectorSize) bad.add(at);
+      onProgress?.call(at + frame.length, length);
+    });
+    for (final at in bad) {
+      final size = (length - at).clamp(0, flashSectorSize);
+      var ok = false;
+      for (var attempt = 0; attempt < 3 && !ok; attempt++) {
+        await _readFlashStream(offset + at, size, (_, frame) {
+          if (frame.length == size) {
+            out.setRange(at, at + size, frame);
+            ok = true;
+          }
+        });
+      }
+      if (!ok) throw EspProtocolException('Flash read at 0x${(offset + at).toRadixString(16)} kept arriving truncated');
+    }
+    final actual = md5.convert(out).toString();
+    if (digest != actual) throw EspProtocolException('Digest mismatch: device $digest, host $actual');
+    return out;
+  }
+
+  /// One `READ_FLASH` transfer, delivering each frame (with its offset within
+  /// the region) to [onFrame] and returning the stub's hex MD5 of the region.
+  /// Frames are counted at their nominal sector size so a short frame doesn't
+  /// shift the ones after it.
+  Future<String> _readFlashStream(int offset, int length, void Function(int at, Uint8List frame) onFrame) async {
     const maxInFlight = 64;
     await checkCommand('read flash',
         op: EspCommand.readFlash, data: _bytes([_u32(offset), _u32(length), _u32(flashSectorSize), _u32(maxInFlight)]));
-    final out = BytesBuilder(copy: false);
-    while (out.length < length) {
+    var received = 0; // what the stub believes it has sent, sector by sector
+    while (received < length) {
       final frame = await _reader.read(defaultTimeout);
-      out.add(frame);
-      if (out.length < length && frame.length < flashSectorSize) {
-        throw EspProtocolException('Corrupt data: expected 0x${flashSectorSize.toRadixString(16)}-byte '
-            'frame but received 0x${frame.length.toRadixString(16)} bytes');
-      }
-      await transport.write(slipEncode(_u32(out.length)));
-      onProgress?.call(out.length, length);
+      final nominal = (length - received).clamp(0, flashSectorSize);
+      if (frame.length > nominal) throw EspProtocolException('Read more than expected');
+      onFrame(received, frame.length > nominal ? Uint8List.sublistView(frame, 0, nominal) : frame);
+      received += nominal;
+      // The ack carries the byte count the stub expects to have delivered;
+      // acking what actually arrived would stall it forever after a drop.
+      await transport.write(slipEncode(_u32(received)));
     }
-    if (out.length > length) throw EspProtocolException('Read more than expected');
-    final data = out.toBytes();
     final digest = await _reader.read(defaultTimeout);
     if (digest.length != 16) throw EspProtocolException('Expected MD5 digest, got ${_hex(digest)}');
-    final expected = _hex(digest);
-    final actual = md5.convert(data).toString();
-    if (expected != actual) throw EspProtocolException('Digest mismatch: device $expected, host $actual');
-    return data;
+    return _hex(digest);
   }
 
   // --------------------------------------------------------------------------
