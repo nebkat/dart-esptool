@@ -445,6 +445,7 @@ class _FlashPageState extends State<FlashPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(children: [
         SizedBox(width: 200, child: leading),
+        const SizedBox(width: 16),
         Expanded(child: description),
         const SizedBox(width: 16),
         _plannedCell(key, planned, warning, onRemove: onRemove),
@@ -463,7 +464,7 @@ class _FlashPageState extends State<FlashPage> {
       TableSource.file => '${plan.fileTableSource} (${plan.fileTable!.length} partitions)',
     };
     final problem = plan.tableSource == TableSource.file ? plan.fileTableProblem : null;
-    return _box(scheme, title: 'Partition table', trailing: _tableMenu(table), children: [
+    return _box(scheme, title: 'Partition table', children: [
       _row(
         key: _tableKey,
         leading: Row(children: [
@@ -500,6 +501,7 @@ class _FlashPageState extends State<FlashPage> {
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
             onSelectionChanged: table == null ? null : (s) => plan.setTableUse(s.single),
           ),
+          IconButton(tooltip: 'What Reference and Flash mean', icon: const Icon(Icons.help_outline, size: 18), onPressed: _explainTableUse),
           TextButton.icon(onPressed: () => _pick(_tableKey, extensions: ['csv', 'bin']), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Open…')),
           if (plan.fileTable != null) TextButton(onPressed: () => _log(plan.closeTableFile(), error: true), child: const Text('Close file')),
         ],
@@ -507,26 +509,34 @@ class _FlashPageState extends State<FlashPage> {
     ]);
   }
 
-  Widget _tableMenu(PartitionTable? table) => MenuAnchor(
-        builder: (context, controller, _) => TextButton.icon(
-          onPressed: table == null ? null : () => controller.isOpen ? controller.close() : controller.open(),
-          icon: const Icon(Icons.download, size: 18),
-          label: const Text('Export'),
+  /// What Reference and Flash mean for the table.
+  Future<void> _explainTableUse() => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reference or flash the partition table?'),
+          content: const SizedBox(
+            width: 560,
+            child: Text(
+              "The partition table is what gives partitions their names, so the plan always works against one: the device's own, "
+              'or one opened from a file.\n\n'
+              'Reference only uses it to name the partitions and nothing more. Nothing is written to the table sector, '
+              'and a bundle saved from this plan carries no table, so it will flash onto any device whose table already has these names.\n\n'
+              'Flash writes the table first, before anything else, and includes it in a saved bundle, so the bundle carries the layout '
+              "its files were named against and can be applied to a device with a different table. Writing the device's own table back "
+              'to it changes nothing on that device. Only the map is replaced: existing partition data is not moved, resized or erased.',
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
         ),
-        menuChildren: [
-          MenuItemButton(onPressed: () => saveText('partitions.csv', table!.toCsv(), mimeType: 'text/csv'), child: const Text('Save as CSV')),
-          MenuItemButton(onPressed: () => saveBytes('partition-table.bin', table!.toBinary()), child: const Text('Save as binary')),
-          MenuItemButton(onPressed: () => showText(context, title: 'Partition table', text: table!.format()), child: const Text('Show as text')),
-        ],
       );
 
   Widget _bootloaderBox(ColorScheme scheme, bool offline) {
     final row = plan.bootloaderRow;
     final op = plan.bootloaderOp;
-    return _box(scheme, title: 'Bootloader', trailing: offline ? _chipPicker() : null, children: [
+    return _box(scheme, title: 'Bootloader', children: [
       _row(
         key: row?.name ?? 'bootloader',
-        leading: const Text('bootloader.bin', style: TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+        leading: offline ? _chipPicker() : Text(plan.chip?.name ?? '', style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
         description: Text(
             row == null
                 ? 'Pick a chip to know the bootloader offset'
@@ -556,7 +566,7 @@ class _FlashPageState extends State<FlashPage> {
           style: const ButtonStyle(visualDensity: VisualDensity.compact),
           onSelectionChanged: (s) => _log(plan.setAppRole(s.single)),
         ),
-        description: Text('${role.fileStem}.bin → ${role.description}${target == null ? '' : ' ($target)'}', style: TextStyle(color: scheme.outline)),
+        description: Text('${role.description[0].toUpperCase()}${role.description.substring(1)}${target == null ? '' : ' ($target)'}', style: TextStyle(color: scheme.outline)),
         planned: app == null ? null : 'Write ${app.name} (${app.bytes.length.bytesString})',
         warning: plan.appWarning,
         onRemove: plan.unstageApp,
@@ -629,6 +639,14 @@ class _FlashPageState extends State<FlashPage> {
     if (_hoverRow == name) return Text('Drop to write', style: TextStyle(color: scheme.primary, fontStyle: FontStyle.italic));
     if (planned == null) return _dragging ? const SizedBox.shrink() : Text('—', style: TextStyle(color: scheme.outlineVariant));
     final passive = planned == 'Reference only';
+    if (passive) {
+      return ActionChip(
+        avatar: const Icon(Icons.visibility_outlined, size: 18),
+        label: Text(planned),
+        tooltip: 'What Reference and Flash mean',
+        onPressed: _explainTableUse,
+      );
+    }
     return InputChip(
       avatar: Icon(
         warning != null
