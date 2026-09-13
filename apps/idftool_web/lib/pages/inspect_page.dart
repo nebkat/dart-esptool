@@ -11,14 +11,18 @@ import '../util/files.dart';
 import '../util/inspect.dart';
 import '../widgets/type_chip.dart';
 import '../widgets/dropdown.dart';
+import '../widgets/empty_state.dart';
 
 /// Open any idftool file without a device — partition tables, flash images,
 /// app and bootloader images, bundles, NVS images and CSVs, filesystem
 /// images and ZIPs of files — see what is in it, convert it, and hand
 /// tables and bundles to the partitions planner.
 class InspectPage extends StatefulWidget {
-  const InspectPage({super.key, required this.session, this.onPlanTable, this.onPlanBundle});
+  const InspectPage({super.key, required this.session, this.onPlanTable, this.onPlanBundle, this.onOpenData});
   final DeviceSession session;
+
+  /// Open an NVS or filesystem file in the Data tool.
+  final void Function(PickedFile file)? onOpenData;
 
   /// Plan changes against this table in the partitions tool.
   final void Function(PartitionTable table, String source)? onPlanTable;
@@ -161,14 +165,17 @@ class _InspectPageState extends State<InspectPage> {
             FilledButton.tonalIcon(onPressed: () => widget.onPlanBundle!(i.file.bytes, i.file.name), icon: const Icon(Icons.edit_outlined), label: const Text('Plan this bundle')),
         ],
       FileKind.nvsImage => [
+          if (widget.onOpenData != null) FilledButton.tonalIcon(onPressed: () => widget.onOpenData!(i.file), icon: const Icon(Icons.storage), label: const Text('Open in Data')),
           OutlinedButton.icon(
               onPressed: () => saveText('${i.stem}.csv', nvsToCsv(i.nvs!.entries), mimeType: 'text/csv'), icon: const Icon(Icons.download), label: const Text('Save as CSV')),
         ],
       FileKind.nvsCsv => [
+          if (widget.onOpenData != null) FilledButton.tonalIcon(onPressed: () => widget.onOpenData!(i.file), icon: const Icon(Icons.storage), label: const Text('Open in Data')),
           _sizeField('Image size'),
           FilledButton.tonalIcon(onPressed: () => _buildNvs(i), icon: const Icon(Icons.build_outlined), label: const Text('Build NVS image')),
         ],
       FileKind.fsImage => [
+          if (widget.onOpenData != null) FilledButton.tonalIcon(onPressed: () => widget.onOpenData!(i.file), icon: const Icon(Icons.storage), label: const Text('Open in Data')),
           OutlinedButton.icon(
               onPressed: () => saveBytes('${i.stem}.zip', i.volume!.toZip(), mimeType: 'application/zip'),
               icon: const Icon(Icons.download),
@@ -208,54 +215,61 @@ class _InspectPageState extends State<InspectPage> {
       onDragDone: _onDrop,
       child: Container(
         decoration: _dragging ? BoxDecoration(border: Border.all(color: scheme.primary, width: 2)) : null,
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-            FilledButton.tonalIcon(onPressed: _busy ? null : _open, icon: const Icon(Icons.folder_open), label: const Text('Open file…')),
-            Text('or drop a file here. Partition tables, flash images, app and bootloader images, bundles, NVS images and CSVs, filesystem images and ZIPs of files.',
-                style: TextStyle(color: scheme.outline)),
-          ]),
-          const SizedBox(height: 12),
-          if (_busy)
-            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-          else if (i != null) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    TypeChip(i.kind.label, _kindColor(i.kind)),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(i.file.name, style: theme.textTheme.titleMedium)),
-                    Text(i.file.bytes.length.bytesString, style: TextStyle(color: scheme.outline)),
-                  ]),
-                  const SizedBox(height: 8),
-                  Text(i.summary),
-                  if (i.problem != null) ...[
-                    const SizedBox(height: 8),
-                    Text('Table verification failed: ${i.problem}', style: TextStyle(color: scheme.error)),
-                  ] else if (i.table != null) ...[
-                    const SizedBox(height: 8),
-                    Text('Table verification passed.', style: TextStyle(color: scheme.outline)),
-                  ],
-                  if (_actions(i) case final actions when actions.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: actions),
-                  ],
+        child: i == null && !_busy
+            ? EmptyState(
+                icon: Icons.folder_open,
+                title: 'Nothing opened',
+                message: 'Open a file, or drop one anywhere on this page, to see what is in it: partition tables, flash images, app and bootloader images, '
+                    'bundles, NVS images and CSVs, filesystem images and ZIPs of files. No device needed.',
+                actions: [FilledButton.tonalIcon(onPressed: _open, icon: const Icon(Icons.folder_open), label: const Text('Open file…'))],
+              )
+            : ListView(padding: const EdgeInsets.all(16), children: [
+                Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                  FilledButton.tonalIcon(onPressed: _busy ? null : _open, icon: const Icon(Icons.folder_open), label: const Text('Open file…')),
+                  Text('or drop a file anywhere on this page.', style: TextStyle(color: scheme.outline)),
                 ]),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SelectableText(i.report, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 12)),
-                ),
-              ),
-            ),
-          ],
-        ]),
+                const SizedBox(height: 12),
+                if (_busy)
+                  const LoadingState('Inspecting…')
+                else if (i != null) ...[
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          TypeChip(i.kind.label, _kindColor(i.kind)),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(i.file.name, style: theme.textTheme.titleMedium)),
+                          Text(i.file.bytes.length.bytesString, style: TextStyle(color: scheme.outline)),
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(i.summary),
+                        if (i.problem != null) ...[
+                          const SizedBox(height: 8),
+                          Text('Table verification failed: ${i.problem}', style: TextStyle(color: scheme.error)),
+                        ] else if (i.table != null) ...[
+                          const SizedBox(height: 8),
+                          Text('Table verification passed.', style: TextStyle(color: scheme.outline)),
+                        ],
+                        if (_actions(i) case final actions when actions.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: actions),
+                        ],
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SelectableText(i.report, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 12)),
+                      ),
+                    ),
+                  ),
+                ],
+              ]),
       ),
     );
   }

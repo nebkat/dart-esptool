@@ -150,7 +150,7 @@ class _OneClickPageState extends State<OneClickPage> {
                   ],
                   Wrap(spacing: 8, children: [
                     if (widget.bundleUrl != null) FilledButton.tonal(onPressed: () => _fetch(widget.bundleUrl!), child: const Text('Retry')),
-                    OutlinedButton.icon(onPressed: _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
+                    FilledButton.tonalIcon(onPressed: _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
                   ]),
                 ]),
               _ => _bundleCard(bundle!, theme),
@@ -206,7 +206,7 @@ class _OneClickPageState extends State<OneClickPage> {
                 const SizedBox(height: 8),
                 Text('Reconnect the device and try again. If it keeps failing, send the log below to support.', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 8),
-                FilledButton(onPressed: () => setState(() => _phase = _Phase.ready), child: const Text('Try again')),
+                FilledButton.tonal(onPressed: () => setState(() => _phase = _Phase.ready), child: const Text('Try again')),
               ]),
             _ => _connectAndFlash(theme),
           },

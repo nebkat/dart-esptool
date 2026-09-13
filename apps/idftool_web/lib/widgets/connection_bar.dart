@@ -28,7 +28,7 @@ class ConnectionBar extends StatelessWidget {
               PortPicker(session: session, enabled: !locked),
               Tooltip(
                 message: 'Connect briefly to every granted port to learn its chip and MAC (each device is reset)',
-                child: OutlinedButton.icon(
+                child: FilledButton.tonalIcon(
                   onPressed: session.busy || session.ports.isEmpty ? null : session.identifyAll,
                   icon: const Icon(Icons.search),
                   label: const Text('Identify all'),
@@ -44,12 +44,6 @@ class ConnectionBar extends StatelessWidget {
                   if (v != null) session.setReset(v);
                 },
               ),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Checkbox(
-                    value: session.useStub,
-                    onChanged: locked ? null : (v) => session.setUseStub(v!)),
-                const Text('Flasher stub'),
-              ]),
               if (!session.connected)
                 FilledButton.icon(
                   onPressed: session.busy || session.selectedPort == null

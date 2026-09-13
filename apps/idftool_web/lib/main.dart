@@ -3,15 +3,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:idftool/idftool.dart' show PartitionTable;
 
-import 'pages/device_page.dart';
-import 'pages/filesystem_page.dart';
-import 'pages/firmware_page.dart';
+import 'pages/data_page.dart';
 import 'pages/flash_page.dart';
 import 'pages/inspect_page.dart';
-import 'pages/nvs_page.dart';
 import 'pages/oneclick_page.dart';
 import 'pages/partitions_page.dart';
 import 'session/device_session.dart';
+import 'util/files.dart';
 import 'theme.dart';
 import 'widgets/connection_bar.dart';
 import 'widgets/log_panel.dart';
@@ -51,12 +49,9 @@ class IdfToolApp extends StatelessWidget {
 /// The tools, as navigation destinations. Pages that need the idftool
 /// library light up as it lands.
 enum Tool {
-  device('Device', Icons.memory),
   partitions('Partitions', Icons.table_chart_outlined),
   flash('Flash', Icons.flash_on),
-  nvs('NVS', Icons.storage),
-  filesystem('Files', Icons.folder_outlined),
-  firmware('Firmware', Icons.system_update_alt),
+  data('Data', Icons.storage),
   inspect('Inspect', Icons.search);
 
   const Tool(this.label, this.icon);
@@ -73,9 +68,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   final _session = DeviceSession();
-  Tool _tool = Tool.device;
-  String? _nvsPartition;
-  String? _fsPartition;
+  Tool _tool = Tool.partitions;
+  String? _dataPartition;
+  PickedFile? _dataFile;
 
   @override
   void dispose() {
@@ -118,28 +113,30 @@ class _HomeShellState extends State<HomeShell> {
       listenable: _session,
       builder: (context, _) {
         final page = switch (_tool) {
-          Tool.device => DevicePage(session: _session),
           Tool.partitions => PartitionsPage(
               session: _session,
-              onOpenNvs: (name) => setState(() {
-                _nvsPartition = name;
-                _tool = Tool.nvs;
-              }),
-              onOpenFilesystem: (name) => setState(() {
-                _fsPartition = name;
-                _tool = Tool.filesystem;
+              onBrowse: (name) => setState(() {
+                _dataPartition = name;
+                _dataFile = null;
+                _tool = Tool.data;
               }),
               onOpenFlash: () => setState(() => _tool = Tool.flash),
               onPlanTable: _planTable,
             ),
           Tool.flash => FlashPage(session: _session),
-          Tool.nvs => NvsPage(key: ValueKey(_nvsPartition), session: _session, initialPartition: _nvsPartition),
-          Tool.filesystem => FilesystemPage(key: ValueKey(_fsPartition), session: _session, initialPartition: _fsPartition),
-          Tool.firmware => FirmwarePage(session: _session),
-          Tool.inspect => InspectPage(session: _session, onPlanTable: _planTable, onPlanBundle: _planBundle),
+          Tool.data => DataPage(key: ValueKey((_dataPartition, _dataFile)), session: _session, initialPartition: _dataPartition, initialFile: _dataFile),
+          Tool.inspect => InspectPage(
+              session: _session,
+              onPlanTable: _planTable,
+              onPlanBundle: _planBundle,
+              onOpenData: (file) => setState(() {
+                _dataFile = file;
+                _dataPartition = null;
+                _tool = Tool.data;
+              }),
+            ),
         };
         return Scaffold(
-          appBar: AppBar(title: const Text('idftool')),
           body: Column(children: [
             ConnectionBar(session: _session),
             const Divider(height: 1),
@@ -147,6 +144,7 @@ class _HomeShellState extends State<HomeShell> {
               flex: 3,
               child: Row(children: [
                 NavigationRail(
+                  groupAlignment: 0,
                   selectedIndex: _tool.index,
                   labelType: NavigationRailLabelType.all,
                   onDestinationSelected: (i) => setState(() => _tool = Tool.values[i]),

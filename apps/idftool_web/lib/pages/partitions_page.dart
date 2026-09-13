@@ -6,8 +6,10 @@ import '../session/device_session.dart';
 import '../session/flash_plan.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/dropdown.dart';
 import '../widgets/partition_grid.dart';
 import '../widgets/partition_map.dart';
+import '../widgets/empty_state.dart';
 
 /// What is on the device: bootloader, partition table and partitions, with
 /// per-row dump and, for NVS and filesystem partitions, a way into their
@@ -15,17 +17,15 @@ import '../widgets/partition_map.dart';
 /// with or without a device. Nothing here writes; changes are planned on
 /// the Flash page.
 class PartitionsPage extends StatefulWidget {
-  const PartitionsPage({super.key, required this.session, this.onOpenNvs, this.onOpenFilesystem, this.onOpenFlash, this.onPlanTable});
+  const PartitionsPage({super.key, required this.session, this.onBrowse, this.onOpenFlash, this.onPlanTable});
   final DeviceSession session;
 
   /// Called to plan changes against an opened table file in the Flash tool.
   final void Function(PartitionTable table, String source)? onPlanTable;
 
-  /// Called with a partition name to browse it in the NVS tool.
-  final ValueChanged<String>? onOpenNvs;
-
-  /// Called with a partition name to browse it in the filesystem tool.
-  final ValueChanged<String>? onOpenFilesystem;
+  /// Called with an NVS or filesystem partition's name to open it in the
+  /// Data tool.
+  final ValueChanged<String>? onBrowse;
 
   /// Called to show the Flash page (when a plan is waiting there).
   final VoidCallback? onOpenFlash;
@@ -105,6 +105,14 @@ class _PartitionsPageState extends State<PartitionsPage> {
     if (data != null) await saveBytes('${p.name}.bin', data);
   }
 
+  /// The whole flash as one image (Inspect can split it into a bundle).
+  Future<void> _dumpImage() async {
+    final size = session.flashSize;
+    if (size == null) return;
+    final data = await session.runDevice('Dump full flash', (d) => d.dumpImage(flashSize: size, onProgress: session.reportProgress));
+    if (data != null) await saveBytes('${session.deviceStem}.img', data);
+  }
+
   /// Every row on the device, virtual ones included, as a bundle.
   Future<void> _dumpBundle() async {
     final zip = await session.runDevice('Dump bundle', (device) async {
@@ -120,11 +128,41 @@ class _PartitionsPageState extends State<PartitionsPage> {
   }
 
   /// The tool that can browse [p] on the device, if any.
-  ValueChanged<String>? _browser(PartitionDefinition p) {
-    if (!p.isData) return null;
-    if (p.subtype == DataSubtype.nvs.value) return widget.onOpenNvs;
-    if (FsType.forPartition(p) != null) return widget.onOpenFilesystem;
-    return null;
+  /// Whether the Data tool can open [p].
+  static bool _browsable(PartitionDefinition p) => p.isData && (p.subtype == DataSubtype.nvs.value || FsType.forPartition(p) != null);
+
+  /// Boot [slot] next (an `ota_N` index), or clear the selection so the
+  /// factory app boots.
+  Future<void> _setBoot(int slot) async {
+    final table = plan.deviceTable;
+    if (table == null) return;
+    if (slot < 0) {
+      await session.runDevice('Clear boot slot', (d) => d.clearBoot());
+    } else {
+      final p = table.findByType(PartitionType.app, AppSubtype.otaMin + slot).firstOrNull;
+      if (p == null) return;
+      await session.runDevice('Set boot partition to ${p.name}', (d) => d.setBoot(p.name));
+    }
+    await session.readLayout();
+  }
+
+  /// The OTA selection as a dropdown: each `ota_N` slot, or factory.
+  Widget _bootPicker(PartitionTable table, OtaDataParameters otadata, bool busy) {
+    final slots = [for (final p in table.where((p) => p.isOtaApp)) (p.subtype - AppSubtype.otaMin, p.name)]..sort((a, b) => a.$1.compareTo(b.$1));
+    final entry = otadata.entry;
+    return AppDropdown<int>(
+      value: otadata.slot ?? -1,
+      label: 'Boots',
+      width: 260,
+      entries: [
+        const DropdownMenuEntry(value: -1, label: 'Factory (no OTA slot)'),
+        for (final (slot, name) in slots) DropdownMenuEntry(value: slot, label: otadata.slot == slot && entry != null ? '$name (seq ${entry.seq}, ${entry.state.name})' : name),
+      ],
+      enabled: !busy,
+      onSelected: (slot) {
+        if (slot != null && slot != (otadata.slot ?? -1)) _setBoot(slot);
+      },
+    );
   }
 
   @override
@@ -132,12 +170,9 @@ class _PartitionsPageState extends State<PartitionsPage> {
     final connected = session.connected;
     final fromFile = _fileTable != null;
     if (!connected && !fromFile) {
-      return Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Connect a device to see its partitions, or open a partition table file to view it.'),
-          const SizedBox(height: 16),
-          FilledButton.tonalIcon(onPressed: _openTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…')),
-        ]),
+      return EmptyState.noDevice(
+        message: 'Connect a device to see its partitions, or open a partition table file to view one.',
+        actions: [FilledButton.tonalIcon(onPressed: _openTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…'))],
       );
     }
     final table = fromFile ? _fileTable : plan.deviceTable;
@@ -149,8 +184,12 @@ class _PartitionsPageState extends State<PartitionsPage> {
         if (connected && !fromFile) ...[
           FilledButton.tonalIcon(onPressed: busy ? null : session.readLayout, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
           OutlinedButton.icon(onPressed: table == null || busy ? null : _dumpBundle, icon: const Icon(Icons.archive_outlined), label: const Text('Dump bundle')),
+          OutlinedButton.icon(
+              onPressed: busy || session.flashSize == null ? null : _dumpImage,
+              icon: const Icon(Icons.download),
+              label: Text('Dump image (${session.flashSize?.bytesString ?? '?'})')),
         ],
-        OutlinedButton.icon(onPressed: _openTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open table file…')),
+        FilledButton.tonalIcon(onPressed: _openTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…')),
         MenuAnchor(
           builder: (context, controller, _) => OutlinedButton.icon(
             onPressed: table == null ? null : () => controller.isOpen ? controller.close() : controller.open(),
@@ -163,11 +202,7 @@ class _PartitionsPageState extends State<PartitionsPage> {
             MenuItemButton(onPressed: () => showText(context, title: 'Partition table', text: table!.format(otadata: otadata)), child: const Text('Show as text')),
           ],
         ),
-        if (otadata != null)
-          Chip(
-            avatar: const Icon(Icons.play_arrow, size: 18),
-            label: Text(otadata.slot == null ? 'OTA slot not set (factory boots)' : 'Boots ota_${otadata.slot} (seq ${otadata.entry!.seq}, ${otadata.entry!.state.name})'),
-          ),
+        if (otadata != null) _bootPicker(table!, otadata, busy),
       ]),
       const SizedBox(height: 12),
       if (fromFile) ...[
@@ -194,16 +229,13 @@ class _PartitionsPageState extends State<PartitionsPage> {
       ],
       if (table == null)
         busy
-            ? const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-            : Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text('Could not read the partition table — see the log.', style: TextStyle(color: scheme.error)),
-                    const SizedBox(height: 8),
-                    FilledButton.tonalIcon(onPressed: session.readLayout, icon: const Icon(Icons.refresh), label: const Text('Try again')),
-                  ]),
-                ),
+            ? const LoadingState('Reading the partition table…')
+            : EmptyState(
+                icon: Icons.error_outline,
+                error: true,
+                title: 'Partition table not read',
+                message: 'See the log for the error.',
+                actions: [FilledButton.tonalIcon(onPressed: session.readLayout, icon: const Icon(Icons.refresh), label: const Text('Try again'))],
               )
       else ...[
         PartitionGrid(
@@ -214,8 +246,8 @@ class _PartitionsPageState extends State<PartitionsPage> {
           actions: (p) => fromFile
               ? const []
               : [
-                  if (_browser(p) case final browse?)
-                    TextButton.icon(onPressed: busy ? null : () => browse(p.name), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Browse')),
+                  if (_browsable(p) && widget.onBrowse != null)
+                    TextButton.icon(onPressed: busy ? null : () => widget.onBrowse!(p.name), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Browse')),
                   TextButton.icon(onPressed: busy ? null : () => _dump(p), icon: const Icon(Icons.download, size: 18), label: const Text('Dump')),
                 ],
         ),
