@@ -498,9 +498,9 @@ class _FlashPageState extends State<FlashPage> {
         leading: Row(mainAxisSize: MainAxisSize.min, children: [
           SegmentedButton<TableSource>(
             segments: [
+              ButtonSegment(value: TableSource.none, label: const Text('None'), enabled: !session.connected),
               ButtonSegment(value: TableSource.device, label: const Text('Device'), enabled: session.connected),
               const ButtonSegment(value: TableSource.file, label: Text('File')),
-              ButtonSegment(value: TableSource.none, label: const Text('None'), enabled: !session.connected),
             ],
             selected: {plan.tableSource},
             showSelectedIcon: false,
