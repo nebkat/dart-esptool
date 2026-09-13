@@ -42,8 +42,21 @@ enum FlashRole {
   final String description;
 }
 
-/// Where the partition table being planned against comes from.
-enum TableSource { device, file }
+/// A write to a partition named by hand (or by its file's name) while no
+/// table says whether it exists: the bundle's `<name>.bin` with nothing to
+/// check it against. Resolved into a [PlannedOp] as soon as a table has
+/// the name; kept, with a warning, when it does not.
+class ManualWrite {
+  const ManualWrite(this.name, this.file, {this.warning});
+  final String name;
+  final PickedFile file;
+  final String? warning;
+  String get summary => 'Write ${file.name} (${file.bytes.length.bytesString})';
+}
+
+/// Where the partition table being planned against comes from. [none]
+/// plans by name alone, for a bundle or a device not connected yet.
+enum TableSource { device, file, none }
 
 /// Whether that table is written too, or only names the partitions.
 enum TableUse { reference, flash }
@@ -68,10 +81,11 @@ class FlashPlan extends ChangeNotifier {
   PartitionTable? _fileTable;
   String? _fileTableSource;
   String? _fileTableProblem;
-  TableSource _tableSource = TableSource.device;
+  TableSource _tableSource = TableSource.none;
   TableUse _tableUse = TableUse.reference;
 
   final _ops = <String, PlannedOp>{};
+  final _manual = <ManualWrite>[];
   FlashRole _appRole = FlashRole.ota;
   PickedFile? _app;
   String? _appWarningText;
@@ -113,18 +127,28 @@ class FlashPlan extends ChangeNotifier {
     _deviceTable = null;
     _deviceApps = const {};
     _otadata = null;
+    if (_tableSource == TableSource.none) _tableSource = TableSource.device;
     final notes = _reconcile();
     notifyListeners();
     return notes;
   }
 
-  /// Called on disconnect. A plan on a file's table survives; one on the
-  /// device's own table loses its named ops.
+  /// Called on disconnect. A plan on a file's table survives as it is; one
+  /// on the device's own table keeps its writes by name (erases are
+  /// dropped) and goes on without a table.
   void detach() {
     _connected = false;
     _deviceTable = null;
     _deviceApps = const {};
     _otadata = null;
+    if (_tableSource == TableSource.device) {
+      for (final op in _ops.values.toList()) {
+        if (op.partition.isPrimaryBootloader) continue;
+        if (op.isWrite) _manual.add(ManualWrite(op.partition.name, op.file!));
+        _ops.remove(op.partition.name);
+      }
+      _tableSource = TableSource.none;
+    }
     _reconcile();
     notifyListeners();
   }
@@ -153,8 +177,12 @@ class FlashPlan extends ChangeNotifier {
   /// Why the file's table failed verification, if it did.
   String? get fileTableProblem => _fileTableProblem;
 
-  /// The table named partitions are planned against.
-  PartitionTable? get table => _tableSource == TableSource.file ? _fileTable : _deviceTable;
+  /// The table named partitions are planned against (`null` under [TableSource.none]).
+  PartitionTable? get table => switch (_tableSource) {
+        TableSource.file => _fileTable,
+        TableSource.device => _deviceTable,
+        TableSource.none => null,
+      };
 
   /// The table that will be written and put in the bundle, if any.
   PartitionTable? get stagedTable => _tableUse == TableUse.flash ? table : null;
@@ -185,6 +213,7 @@ class FlashPlan extends ChangeNotifier {
 
   List<String> setTableSource(TableSource source) {
     if (source == TableSource.file && _fileTable == null) return const [];
+    if (source == TableSource.none) _tableUse = TableUse.reference;
     _tableSource = source;
     final notes = _reconcile();
     notifyListeners();
@@ -201,7 +230,7 @@ class FlashPlan extends ChangeNotifier {
     _fileTable = null;
     _fileTableSource = null;
     _fileTableProblem = null;
-    _tableSource = TableSource.device;
+    _tableSource = _connected ? TableSource.device : TableSource.none;
     _tableUse = TableUse.reference;
     final notes = _reconcile();
     notifyListeners();
@@ -218,6 +247,9 @@ class FlashPlan extends ChangeNotifier {
   /// One line saying what named partitions resolve against, and so whether
   /// a bundle of this plan carries a table or relies on the device's.
   String get addressing {
+    if (_tableSource == TableSource.none) {
+      return "Partitions are named freely (a file's name by default) and checked against the device's table when flashing; a bundle of this plan carries no table.";
+    }
     if (table == null) return 'No partition table: only the bootloader and the app can be planned until one is read from a device or opened.';
     final from = _tableSource == TableSource.file ? 'the table from $_fileTableSource' : "the device's table";
     return _tableUse == TableUse.flash
@@ -381,16 +413,62 @@ class FlashPlan extends ChangeNotifier {
   }
 
   // --------------------------------------------------------------------------
+  // Writes by name alone
+  // --------------------------------------------------------------------------
+
+  /// Writes waiting for a table with their name (all of them under
+  /// [TableSource.none]; the unmatched ones otherwise).
+  List<ManualWrite> get manual => List.unmodifiable(_manual);
+
+  /// Queue [file] for the partition called [name] (the file's stem by
+  /// default). With a table that has the name it becomes a normal write.
+  String? stageManual(PickedFile file, {String? name}) {
+    if (file.bytes.isEmpty) return '${file.name} is empty';
+    final n = (name ?? _stem(file.name)).trim();
+    if (n.isEmpty) return 'A partition name is needed';
+    if (n.startsWith(bundleRolePrefix)) return "Partition names cannot start with '$bundleRolePrefix'";
+    _manual.removeWhere((m) => m.name == n);
+    _manual.add(ManualWrite(n, file));
+    _reconcile();
+    notifyListeners();
+    return null;
+  }
+
+  String? renameManual(int index, String name) {
+    final n = name.trim();
+    if (n.isEmpty) return 'A partition name is needed';
+    if (n.startsWith(bundleRolePrefix)) return "Partition names cannot start with '$bundleRolePrefix'";
+    if (_manual.indexWhere((m) => m.name == n) case final other when other >= 0 && other != index) return "'$n' is already planned";
+    _manual[index] = ManualWrite(n, _manual[index].file);
+    _reconcile();
+    notifyListeners();
+    return null;
+  }
+
+  void unstageManual(int index) {
+    _manual.removeAt(index);
+    notifyListeners();
+  }
+
+  static String _stem(String fileName) => fileName.contains('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+
+  // --------------------------------------------------------------------------
   // Whole plan
   // --------------------------------------------------------------------------
 
-  bool get isEmpty => stagedTable == null && _ops.isEmpty && _app == null;
-  int get length => _ops.length + (_app == null ? 0 : 1) + (stagedTable == null ? 0 : 1);
-  int get bytesToWrite => _ops.values.fold(0, (n, op) => n + (op.file?.bytes.length ?? 0)) + (_app?.bytes.length ?? 0);
-  int get warningCount => _ops.values.where((op) => op.warning != null).length + (_appWarningText == null ? 0 : 1) + (stagedTableProblem == null ? 0 : 1);
+  bool get isEmpty => stagedTable == null && _ops.isEmpty && _manual.isEmpty && _app == null;
+  int get length => _ops.length + _manual.length + (_app == null ? 0 : 1) + (stagedTable == null ? 0 : 1);
+  int get bytesToWrite =>
+      _ops.values.fold<int>(0, (n, op) => n + (op.file?.bytes.length ?? 0)) + _manual.fold<int>(0, (n, m) => n + m.file.bytes.length) + (_app?.bytes.length ?? 0);
+  int get warningCount =>
+      _ops.values.where((op) => op.warning != null).length +
+      _manual.where((m) => m.warning != null).length +
+      (_appWarningText == null ? 0 : 1) +
+      (stagedTableProblem == null ? 0 : 1);
 
   void clear() {
     _ops.clear();
+    _manual.clear();
     _app = null;
     _appWarningText = null;
     _tableUse = TableUse.reference;
@@ -415,6 +493,26 @@ class FlashPlan extends ChangeNotifier {
       if (problem != null) notes.add('Dropped ${op.summary.toLowerCase()} for $name: $problem');
     }
     if (_app case final app?) _appWarningText = _chipWarning(app.bytes, appRequired: true, what: 'app image');
+    // Writes by name: resolve the ones the table has, warn about the rest.
+    final t = table;
+    for (var i = 0; i < _manual.length; i++) {
+      final m = _manual[i];
+      if (t == null) {
+        _manual[i] = ManualWrite(m.name, m.file);
+        continue;
+      }
+      final p = current[m.name];
+      if (p == null || p.isPrimaryBootloader) {
+        _manual[i] = ManualWrite(m.name, m.file, warning: "No partition named '${m.name}' in this table; it will be skipped when flashing");
+        continue;
+      }
+      final problem = stageWrite(p, m.file);
+      if (problem == null) {
+        _manual.removeAt(i--);
+      } else {
+        _manual[i] = ManualWrite(m.name, m.file, warning: problem);
+      }
+    }
     return notes;
   }
 
@@ -453,6 +551,7 @@ class FlashPlan extends ChangeNotifier {
         partitions: {
           for (final op in orderedOps)
             if (op.isWrite) op.partition.name: op.file!.bytes,
+          for (final m in _manual) m.name: m.file.bytes,
         },
       );
 
@@ -472,17 +571,8 @@ class FlashPlan extends ChangeNotifier {
       if (r.problem case final problem?) notes.add('${role.fileStem}.bin: $problem');
       notes.addAll(r.dropped);
     }
-    if (bundle.partitions.isNotEmpty && table == null) {
-      notes.add('${bundle.partitions.length} named partition file(s) skipped: this bundle carries no table and none has been read from a device');
-    } else {
-      for (final MapEntry(key: name, value: bytes) in bundle.partitions.entries) {
-        final target = row(name);
-        if (target == null) {
-          notes.add('$name.bin: no partition named "$name"');
-          continue;
-        }
-        if (stageWrite(target, (name: '$name.bin', bytes: bytes)) case final problem?) notes.add('$name.bin: $problem');
-      }
+    for (final MapEntry(key: name, value: bytes) in bundle.partitions.entries) {
+      if (stageManual((name: '$name.bin', bytes: bytes), name: name) case final problem?) notes.add('$name.bin: $problem');
     }
     if (bundle.manifest case final m?) {
       notes.add('manifest.json (${m.name}, ${m.steps.length} step(s)) is not applied here; use the one-click page for manifest bundles');

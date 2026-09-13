@@ -33,6 +33,7 @@ class FlashPage extends StatefulWidget {
 /// Drop-target names for the rows that aren't partitions.
 const _tableKey = 'partition_table';
 const _appKey = '@app';
+const _partitionsKey = 'partitions';
 
 class _FlashPageState extends State<FlashPage> {
   /// The row a drag is currently over: a partition name or a box's key.
@@ -42,6 +43,10 @@ class _FlashPageState extends State<FlashPage> {
 
   /// Planning without a device or table was chosen explicitly.
   bool _started = false;
+
+  /// Name fields for writes by name, per entry (entries are replaced on
+  /// rename, which resets the field to the new name).
+  final _nameFields = <ManualWrite, TextEditingController>{};
 
   DeviceSession get session => widget.session;
   FlashPlan get plan => session.plan;
@@ -58,6 +63,9 @@ class _FlashPageState extends State<FlashPage> {
   void dispose() {
     plan.removeListener(_rebuild);
     session.removeListener(_onSessionChanged);
+    for (final c in _nameFields.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -111,6 +119,17 @@ class _FlashPageState extends State<FlashPage> {
     session.addLog('Planned: ${plan.appRole.label} flash ${file.name} (${file.bytes.length.bytesString})${plan.appWarning == null ? '' : ' — ${plan.appWarning}'}');
   }
 
+  void _stageManual(PickedFile file, {String? name}) {
+    final problem = plan.stageManual(file, name: name);
+    if (problem != null) return session.addLog(problem, error: true);
+    session.addLog("Planned: write ${file.name} (${file.bytes.length.bytesString}) to the partition named '${name ?? file.name.split('.').first}'");
+  }
+
+  void _renameManual(int index, String name) {
+    final problem = plan.renameManual(index, name);
+    if (problem != null) session.addLog(problem, error: true);
+  }
+
   void _stageErase(PartitionDefinition p) {
     final problem = plan.stageErase(p);
     if (problem != null) return session.addLog(problem, error: true);
@@ -141,8 +160,12 @@ class _FlashPageState extends State<FlashPage> {
     if (target == _appKey) return _stageApp(file);
     final role = FlashRole.values.where((r) => r.fileStem == target).firstOrNull;
     if (role != null) return _stageApp(file, role: role);
+    if (target == _partitionsKey) return _stageManual(file);
     final p = plan.row(target);
-    if (p == null) return session.addLog('${file.name}: no partition named "$target" — drop it onto a row to choose one', error: true);
+    if (p == null) {
+      if (plan.table == null) return _stageManual(file, name: target);
+      return session.addLog('${file.name}: no partition named "$target" — drop it onto a row to choose one', error: true);
+    }
     p.isPrimaryBootloader ? _stageBootloader(file) : _stageWrite(p, file);
   }
 
@@ -310,6 +333,9 @@ class _FlashPageState extends State<FlashPage> {
         }
         plan.unstageApp();
       }
+      for (final m in plan.manual) {
+        session.addLog("${m.name}: skipped — no partition of that name on this device", error: true);
+      }
       for (final op in [...erases, ...writes]) {
         final name = op.partition.name;
         switch (op.kind) {
@@ -407,6 +433,7 @@ class _FlashPageState extends State<FlashPage> {
           onClear: plan.clear,
           onRemove: plan.unstage,
           onRemoveApp: plan.unstageApp,
+          onRemoveManual: plan.unstageManual,
           onDiscardTable: () => plan.setTableUse(TableUse.reference)),
     ]);
   }
@@ -462,6 +489,7 @@ class _FlashPageState extends State<FlashPage> {
     final sourceLabel = switch (plan.tableSource) {
       TableSource.device => "Device's table (${plan.deviceTable?.length ?? 0} partitions)",
       TableSource.file => '${plan.fileTableSource} (${plan.fileTable!.length} partitions)',
+      TableSource.none => 'None',
     };
     final problem = plan.tableSource == TableSource.file ? plan.fileTableProblem : null;
     return _box(scheme, title: 'Partition table', children: [
@@ -469,7 +497,11 @@ class _FlashPageState extends State<FlashPage> {
         key: _tableKey,
         leading: Row(mainAxisSize: MainAxisSize.min, children: [
           SegmentedButton<TableSource>(
-            segments: const [ButtonSegment(value: TableSource.device, label: Text('Device')), ButtonSegment(value: TableSource.file, label: Text('File'))],
+            segments: [
+              ButtonSegment(value: TableSource.device, label: const Text('Device'), enabled: session.connected),
+              const ButtonSegment(value: TableSource.file, label: Text('File')),
+              ButtonSegment(value: TableSource.none, label: const Text('None'), enabled: !session.connected),
+            ],
             selected: {plan.tableSource},
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
@@ -488,16 +520,18 @@ class _FlashPageState extends State<FlashPage> {
             selected: {plan.tableUse},
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            onSelectionChanged: table == null ? null : (s) => plan.setTableUse(s.single),
+            onSelectionChanged: table == null || plan.tableSource == TableSource.none ? null : (s) => plan.setTableUse(s.single),
           ),
           IconButton(tooltip: 'What Reference and Flash mean', icon: const Icon(Icons.help_outline, size: 18), onPressed: _explainTableUse),
         ]),
         description: Text.rich(TextSpan(children: [
-          if (table == null) TextSpan(text: session.connected ? 'Not read yet' : 'Connect a device, or open a table file', style: TextStyle(color: scheme.outline)),
+          if (plan.tableSource == TableSource.none)
+            TextSpan(text: 'No table: partitions are named by their file, or by hand', style: TextStyle(color: scheme.outline))
+          else if (table == null)
+            TextSpan(text: session.connected ? 'Not read yet' : 'Connect a device, or open a table file', style: TextStyle(color: scheme.outline)),
           if (problem != null) TextSpan(text: 'VERIFICATION FAILED: $problem', style: TextStyle(color: scheme.error)),
           if (plan.tableSource == TableSource.file && plan.deviceTable != null && plan.fileTable != plan.deviceTable)
-            TextSpan(
-                text: '  — differs from the device; rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
+            TextSpan(text: 'Differs from the device: rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
         ])),
         planned: table == null ? null : (flash ? 'Write ${plan.tableSource == TableSource.file ? plan.fileTableSource : "the device's table"}' : 'Reference only'),
         warning: flash ? problem : null,
@@ -588,40 +622,102 @@ class _FlashPageState extends State<FlashPage> {
   Widget _partitionsBox(ColorScheme scheme) {
     final table = plan.table;
     if (table == null) {
-      return _box(scheme, title: 'Partitions', children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Text(
-              session.connected
-                  ? 'The partition table has not been read — see the log, or open one above.'
-                  : 'Connect a device or open a partition table above to name partitions.',
-              style: TextStyle(color: scheme.outline)),
-        ),
-      ]);
+      final byName = plan.tableSource == TableSource.none;
+      return _box(
+        scheme,
+        title: 'Partitions',
+        trailing: byName ? TextButton.icon(onPressed: () => _pick(_partitionsKey), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Add file…')) : null,
+        children: [
+          Container(
+            key: _rowKeys.putIfAbsent(_partitionsKey, GlobalKey.new),
+            color: _hoverRow == _partitionsKey ? scheme.primaryContainer : null,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+                byName
+                    ? (_hoverRow == _partitionsKey
+                        ? 'Drop to add, named after the file'
+                        : 'Drop files here, or add them; each is written to the partition named after it, and the name can be changed.')
+                    : session.connected
+                        ? 'The partition table has not been read — see the log, or open one above.'
+                        : 'Open a partition table above, or choose None to name partitions by file.',
+                style: TextStyle(color: byName && _hoverRow == _partitionsKey ? scheme.primary : scheme.outline)),
+          ),
+          ..._manualRows(scheme),
+        ],
+      );
     }
-    return PartitionGrid(
-      rows: plan.partitionRows,
-      table: table,
-      activeSlot: plan.tableSource == TableSource.device ? plan.otadata?.slot : null,
-      highlighted: _dragging,
-      rowKey: (p) => _rowKeys.putIfAbsent(p.name, GlobalKey.new),
-      rowColor: (p) => plan.ownedByApp(p) ? scheme.surfaceContainerHighest.withValues(alpha: 0.5) : _rowColor(p.name, scheme, planned: plan.opFor(p.name) != null),
-      contents: (p) => _contents(p, scheme),
-      extraColumn: 'Planned',
-      extra: (p) => plan.ownedByApp(p)
-          ? Text('Handled by the ${plan.appRole.label} app', style: TextStyle(color: scheme.outline, fontStyle: FontStyle.italic))
-          : _plannedCell(p.name, plan.opFor(p.name)?.summary, plan.opFor(p.name)?.warning, onRemove: () => plan.unstage(p.name)),
-      actions: (p) => plan.ownedByApp(p)
-          ? const []
-          : [
-              TextButton.icon(onPressed: () => _pick(p.name), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
-              TextButton.icon(
-                  onPressed: () => _stageErase(p),
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text('Erase'),
-                  style: TextButton.styleFrom(foregroundColor: scheme.error)),
-            ],
-    );
+    final unmatched = _manualRows(scheme);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      PartitionGrid(
+        rows: plan.partitionRows,
+        table: table,
+        activeSlot: plan.tableSource == TableSource.device ? plan.otadata?.slot : null,
+        highlighted: _dragging,
+        rowKey: (p) => _rowKeys.putIfAbsent(p.name, GlobalKey.new),
+        rowColor: (p) => plan.ownedByApp(p) ? scheme.surfaceContainerHighest.withValues(alpha: 0.5) : _rowColor(p.name, scheme, planned: plan.opFor(p.name) != null),
+        contents: (p) => _contents(p, scheme),
+        extraColumn: 'Planned',
+        extra: (p) => plan.ownedByApp(p)
+            ? Text('Handled by the ${plan.appRole.label} app', style: TextStyle(color: scheme.outline, fontStyle: FontStyle.italic))
+            : _plannedCell(p.name, plan.opFor(p.name)?.summary, plan.opFor(p.name)?.warning, onRemove: () => plan.unstage(p.name)),
+        actions: (p) => plan.ownedByApp(p)
+            ? const []
+            : [
+                TextButton.icon(onPressed: () => _pick(p.name), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
+                TextButton.icon(
+                    onPressed: () => _stageErase(p),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text('Erase'),
+                    style: TextButton.styleFrom(foregroundColor: scheme.error)),
+              ],
+      ),
+      if (unmatched.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _box(scheme, title: 'Not in this table', children: unmatched),
+      ],
+    ]);
+  }
+
+  /// The writes by name, each with an editable target name.
+  List<Widget> _manualRows(ColorScheme scheme) {
+    final manual = plan.manual;
+    _nameFields.removeWhere((m, c) {
+      if (manual.contains(m)) return false;
+      c.dispose();
+      return true;
+    });
+    return [
+      for (final (i, m) in manual.indexed)
+        Container(
+          color: m.warning != null ? scheme.errorContainer.withValues(alpha: 0.25) : scheme.tertiaryContainer.withValues(alpha: 0.35),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Row(children: [
+            SizedBox(
+              width: 260,
+              child: Focus(
+                onFocusChange: (focused) {
+                  if (!focused && _nameFields[m]!.text != m.name) _renameManual(i, _nameFields[m]!.text);
+                },
+                child: TextField(
+                  controller: _nameFields.putIfAbsent(m, () => TextEditingController(text: m.name)),
+                  decoration: const InputDecoration(labelText: 'Partition'),
+                  style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
+                  onSubmitted: (v) => _renameManual(i, v),
+                ),
+              ),
+            ),
+            const SizedBox(width: 24),
+            Expanded(child: Text(m.warning ?? 'Written to the partition of that name', style: TextStyle(color: m.warning != null ? scheme.error : scheme.outline))),
+            const SizedBox(width: 16),
+            InputChip(
+              avatar: Icon(m.warning != null ? Icons.warning_amber : Icons.upload_file, size: 18, color: m.warning != null ? scheme.error : null),
+              label: Text(m.summary),
+              onDeleted: () => plan.unstageManual(i),
+              deleteButtonTooltipMessage: 'Remove from plan',
+            ),
+          ]),
+        ),
+    ];
   }
 
   /// What the device holds at this row, or, on a file's table, how the row
@@ -686,6 +782,7 @@ class _PlanPanel extends StatelessWidget {
     required this.onClear,
     required this.onRemove,
     required this.onRemoveApp,
+    required this.onRemoveManual,
     required this.onDiscardTable,
   });
   final FlashPlan plan;
@@ -696,6 +793,7 @@ class _PlanPanel extends StatelessWidget {
   final VoidCallback onClear;
   final ValueChanged<String> onRemove;
   final VoidCallback onRemoveApp;
+  final ValueChanged<int> onRemoveManual;
   final VoidCallback onDiscardTable;
 
   @override
@@ -707,7 +805,7 @@ class _PlanPanel extends StatelessWidget {
     final erases = ops.where((op) => !op.isWrite).toList();
     final writes = ops.where((op) => op.isWrite).toList();
     final count = plan.length;
-    final bundleable = writes.isNotEmpty || bootloader != null || plan.app != null || plan.stagedTable != null;
+    final bundleable = writes.isNotEmpty || plan.manual.isNotEmpty || bootloader != null || plan.app != null || plan.stagedTable != null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -760,6 +858,8 @@ class _PlanPanel extends StatelessWidget {
                   summary: op.summary,
                   warning: op.warning,
                   onRemove: () => onRemove(op.partition.name)),
+            for (final (i, m) in plan.manual.indexed)
+              _OpTile(icon: Icons.upload_file, name: m.name, detail: 'by name', summary: m.summary, warning: m.warning, onRemove: () => onRemoveManual(i)),
           ],
           const SizedBox(height: 12),
           Row(children: [
