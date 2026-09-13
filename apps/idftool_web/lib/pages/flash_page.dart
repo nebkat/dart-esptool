@@ -12,16 +12,16 @@ import '../widgets/empty_state.dart';
 import '../widgets/partition_grid.dart';
 
 /// Plan changes to the flash and write them in one go, in the bundle's
-/// terms: a replacement partition table, the bootloader, an app for Factory
-/// or OTA, and files or erases for named partitions. Rows take a dropped
-/// or picked file; the queued operations sit at the bottom until one
-/// doubly-confirmed Flash writes them — table, bootloader, Factory or OTA,
+/// terms and in four boxes that mirror its files: the partition table
+/// (`partition_table.csv`, the device's or a file's, flashed or reference
+/// only), the bootloader (`bootloader.bin`), the app (`@factory.bin` or
+/// `@ota.bin`) and the named partitions (`<name>.bin`). Rows take a
+/// dropped or picked file; the queued operations sit at the bottom until
+/// one doubly-confirmed Flash writes them — table, bootloader, app,
 /// erases, then named writes.
 ///
-/// Works without a device: open a partition table or bundle, or plan just
-/// the bootloader and roles, and the plan is kept and re-checked when a
-/// device connects. Save as bundle writes the same files a hand-made
-/// bundle would contain.
+/// Works without a device, and the plan is kept and re-checked when one
+/// connects. Save as bundle writes the same files a hand-made bundle would.
 class FlashPage extends StatefulWidget {
   const FlashPage({super.key, required this.session});
   final DeviceSession session;
@@ -30,14 +30,18 @@ class FlashPage extends StatefulWidget {
   State<FlashPage> createState() => _FlashPageState();
 }
 
+/// Drop-target names for the rows that aren't partitions.
+const _tableKey = 'partition_table';
+const _appKey = '@app';
+
 class _FlashPageState extends State<FlashPage> {
-  /// The row a drag is currently over: a partition name or a role's stem.
+  /// The row a drag is currently over: a partition name or a box's key.
   String? _hoverRow;
   bool _dragging = false;
   final _rowKeys = <String, GlobalKey>{};
 
-  /// Planning without a table was chosen explicitly.
-  bool _bare = false;
+  /// Planning without a device or table was chosen explicitly.
+  bool _started = false;
 
   DeviceSession get session => widget.session;
   FlashPlan get plan => session.plan;
@@ -85,63 +89,71 @@ class _FlashPageState extends State<FlashPage> {
   void _stageWrite(PartitionDefinition p, PickedFile file) {
     final replaced = plan.opFor(p.name);
     final problem = plan.stageWrite(p, file);
-    if (problem != null) {
-      session.addLog(problem, error: true);
-      return;
-    }
+    if (problem != null) return session.addLog(problem, error: true);
     final op = plan.opFor(p.name)!;
     session.addLog('Planned: write ${file.name} (${file.bytes.length.bytesString}) to ${p.name}'
         '${replaced == null ? '' : ' (replacing ${replaced.summary.toLowerCase()})'}'
         '${op.warning == null ? '' : ' — ${op.warning}'}');
   }
 
-  void _stageRole(FlashRole role, PickedFile file) {
-    final problem = plan.stageRole(role, file);
-    if (problem != null) {
-      session.addLog(problem, error: true);
-      return;
-    }
-    final r = plan.roleFor(role)!;
-    session.addLog('Planned: ${r.summary}${r.warning == null ? '' : ' — ${r.warning}'}');
+  void _stageBootloader(PickedFile file) {
+    final problem = plan.stageBootloader(file);
+    if (problem != null) return session.addLog(problem, error: true);
+    final op = plan.bootloaderOp!;
+    session.addLog('Planned: write ${file.name} as the bootloader at ${op.partition.offset.hex}${op.warning == null ? '' : ' — ${op.warning}'}');
+  }
+
+  void _stageApp(PickedFile file, {FlashRole? role}) {
+    if (role != null && role != plan.appRole) _log(plan.setAppRole(role));
+    final r = plan.stageApp(file);
+    if (r.problem case final problem?) return session.addLog(problem, error: true);
+    _log(r.dropped);
+    session.addLog('Planned: ${plan.appRole.label} flash ${file.name} (${file.bytes.length.bytesString})${plan.appWarning == null ? '' : ' — ${plan.appWarning}'}');
   }
 
   void _stageErase(PartitionDefinition p) {
     final problem = plan.stageErase(p);
-    if (problem != null) {
-      session.addLog(problem, error: true);
-      return;
-    }
+    if (problem != null) return session.addLog(problem, error: true);
     final warning = plan.opFor(p.name)!.warning;
     session.addLog('Planned: erase ${p.name}${warning == null ? '' : ' — $warning'}');
   }
 
-  /// Stage [file] on the row called [target]: a role's stem or a partition.
-  void _stageOn(String target, PickedFile file) {
-    final role = FlashRole.values.where((r) => r.fileStem == target).firstOrNull;
-    if (role != null) return _stageRole(role, file);
-    final p = plan.row(target);
-    if (p == null) {
-      session.addLog('${file.name}: no partition named "$target" — drop it onto a row to choose one', error: true);
-      return;
+  void _openTable(PickedFile file, {required bool flash}) {
+    final PartitionTable table;
+    try {
+      table = PartitionTable.isBinary(file.bytes)
+          ? PartitionTable.fromBinary(file.bytes)
+          : parsePartitionTableCsv(PartitionTable.decodeCsv(file.bytes),
+              source: file.name, partitionTableOffset: plan.partitionTableOffset, primaryBootloaderOffset: plan.primaryBootloaderOffset);
+    } catch (e) {
+      return session.addLog('Could not parse ${file.name}: $e', error: true);
     }
-    _stageWrite(p, file);
+    _log(flash ? plan.stageTable(table, source: file.name) : plan.openTableFile(table, source: file.name), error: true);
+    session.addLog('Opened partition table ${file.name} (${table.length} partitions)'
+        '${plan.fileTableProblem == null ? '' : ' — VERIFICATION FAILED: ${plan.fileTableProblem}'}');
+    setState(() => _started = true);
   }
 
-  Future<void> _pickWrite(PartitionDefinition p) async {
-    final file = await pickFile();
-    if (file == null || !mounted) return;
-    _stageWrite(p, file);
+  /// Stage [file] on the row called [target]: a box's key, a role's stem
+  /// or a partition name — the bundle's own naming.
+  void _stageOn(String target, PickedFile file) {
+    if (target == _tableKey) return _openTable(file, flash: plan.tableUse == TableUse.flash);
+    if (target == _appKey) return _stageApp(file);
+    final role = FlashRole.values.where((r) => r.fileStem == target).firstOrNull;
+    if (role != null) return _stageApp(file, role: role);
+    final p = plan.row(target);
+    if (p == null) return session.addLog('${file.name}: no partition named "$target" — drop it onto a row to choose one', error: true);
+    p.isPrimaryBootloader ? _stageBootloader(file) : _stageWrite(p, file);
   }
 
-  Future<void> _pickRole(FlashRole role) async {
-    final file = await pickFile(extensions: ['bin']);
+  Future<void> _pick(String target, {List<String>? extensions}) async {
+    final file = await pickFile(extensions: extensions);
     if (file == null || !mounted) return;
-    _stageRole(role, file);
+    _stageOn(target, file);
   }
 
   /// A single file dropped on a row goes there; otherwise files are matched
-  /// to rows by name — the bundle convention, so a bundle's worth of files
-  /// lands in one drop.
+  /// to rows by name, the way a bundle is.
   Future<void> _stageDropped(List<DropItem> files, String? target) async {
     if (files.isEmpty) return;
     final picked = <PickedFile>[];
@@ -156,38 +168,18 @@ class _FlashPageState extends State<FlashPage> {
     }
   }
 
-  Future<void> _stageTable() async {
-    final file = await pickFile(extensions: ['csv', 'bin']);
-    if (file == null || !mounted) return;
-    final PartitionTable table;
-    try {
-      table = PartitionTable.isBinary(file.bytes)
-          ? PartitionTable.fromBinary(file.bytes)
-          : parsePartitionTableCsv(PartitionTable.decodeCsv(file.bytes),
-              source: file.name, partitionTableOffset: plan.partitionTableOffset, primaryBootloaderOffset: plan.primaryBootloaderOffset);
-    } catch (e) {
-      session.addLog('Could not parse ${file.name}: $e', error: true);
-      return;
-    }
-    _log(plan.stageTable(table, source: file.name), error: true);
-    session.addLog('Planned: replace partition table with ${file.name}'
-        '${plan.stagedTableProblem == null ? '' : ' — VERIFICATION FAILED: ${plan.stagedTableProblem}'}');
-  }
-
   Future<void> _loadBundle() async {
     final file = await pickFile(extensions: ['zip']);
     if (file == null || !mounted) return;
     try {
       _log(plan.loadBundle(file.bytes, source: file.name), error: true);
     } on IdfToolException catch (e) {
-      session.addLog('${file.name}: ${e.message}', error: true);
-      return;
+      return session.addLog('${file.name}: ${e.message}', error: true);
     } catch (e) {
-      session.addLog('${file.name}: $e', error: true);
-      return;
+      return session.addLog('${file.name}: $e', error: true);
     }
     session.addLog('Planned from bundle ${file.name}: ${plan.length} operation${plan.length == 1 ? '' : 's'}');
-    setState(() => _bare = true);
+    setState(() => _started = true);
   }
 
   Future<void> _saveBundle() async {
@@ -200,8 +192,8 @@ class _FlashPageState extends State<FlashPage> {
   // Drag and drop
   // --------------------------------------------------------------------------
 
-  /// The row under [global], if any. Cells are shorter than rows, so a row
-  /// claims the half-pitch either side of its centre.
+  /// The row under [global], if any. Rows are keyed by their name; the
+  /// nearest centre within half a row pitch wins.
   String? _rowAt(Offset global) {
     final centres = <(String, double)>[];
     for (final MapEntry(key: name, value: key) in _rowKeys.entries) {
@@ -210,8 +202,6 @@ class _FlashPageState extends State<FlashPage> {
       centres.add((name, box.localToGlobal(Offset.zero).dy + box.size.height / 2));
     }
     if (centres.isEmpty) return null;
-    centres.sort((a, b) => a.$2.compareTo(b.$2));
-    final pitch = centres.length > 1 ? (centres[1].$2 - centres[0].$2).abs() : 48.0;
     String? best;
     var bestDistance = double.infinity;
     for (final (name, cy) in centres) {
@@ -221,7 +211,7 @@ class _FlashPageState extends State<FlashPage> {
         best = name;
       }
     }
-    return bestDistance <= pitch / 2 ? best : null;
+    return bestDistance <= 28 ? best : null;
   }
 
   void _onDragUpdated(DropEventDetails d) {
@@ -256,23 +246,26 @@ class _FlashPageState extends State<FlashPage> {
   // Flash
   // --------------------------------------------------------------------------
 
-  /// Flash the plan in bundle order: table, bootloader, Factory or OTA,
-  /// erases, named writes — each leaving the plan as it completes so a
-  /// failure leaves exactly what is left.
+  /// Flash the plan in bundle order: table, bootloader, app, erases, named
+  /// writes — each leaving the plan as it completes so a failure leaves
+  /// exactly what is left.
   Future<void> _flash() async {
     if (plan.isEmpty || !session.connected) return;
     final table = plan.stagedTable;
     final bootloader = plan.bootloaderOp;
-    final roles = plan.roles.toList();
-    final ops = plan.orderedOps.where((op) => !op.partition.isPrimaryBootloader).toList();
+    final app = plan.app;
+    final role = plan.appRole;
+    final ops = plan.orderedOps;
     final erases = ops.where((op) => !op.isWrite).toList();
     final writes = ops.where((op) => op.isWrite).toList();
     final lines = [
       if (table != null)
-        '${'partition_table'.padRight(16)} ${plan.partitionTableOffset.hex.padLeft(10)}  Replace with ${plan.stagedTableSource}'
+        '${'partition_table'.padRight(16)} ${plan.partitionTableOffset.hex.padLeft(10)}  Write ${plan.stagedTableSource}'
             '${plan.stagedTableProblem == null ? '' : '   ⚠ VERIFICATION FAILED: ${plan.stagedTableProblem}'}',
       if (bootloader != null) _opLine(bootloader),
-      for (final r in roles) '${r.role.fileStem.padRight(16)} ${''.padLeft(10)}  ${r.summary}${r.warning == null ? '' : '   ⚠ ${r.warning}'}',
+      if (app != null)
+        '${role.fileStem.padRight(16)} ${(plan.appTarget ?? '').padLeft(10)}  Write ${app.name} (${app.bytes.length.bytesString}) to ${role.description}'
+            '${plan.appWarning == null ? '' : '   ⚠ ${plan.appWarning}'}',
       for (final op in erases) _opLine(op),
       for (final op in writes) _opLine(op),
     ];
@@ -306,16 +299,16 @@ class _FlashPageState extends State<FlashPage> {
         session.addLog('bootloader: ${_describe(outcome)}');
         plan.unstage(bootloader.partition.name);
       }
-      for (final r in roles) {
-        switch (r.role) {
+      if (app != null) {
+        switch (role) {
           case FlashRole.factory:
-            final outcome = await device.factory(r.file.bytes, onProgress: session.reportProgress);
+            final outcome = await device.factory(app.bytes, onProgress: session.reportProgress);
             session.addLog('factory: ${_describe(outcome)}; OTA selection cleared');
           case FlashRole.ota:
-            final result = await device.ota(r.file.bytes, onProgress: session.reportProgress);
+            final result = await device.ota(app.bytes, onProgress: session.reportProgress);
             session.addLog('ota: ${result.partition.name} ${_describe(result.outcome)}; boot switched to it');
         }
-        plan.unstageRole(r.role);
+        plan.unstageApp();
       }
       for (final op in [...erases, ...writes]) {
         final name = op.partition.name;
@@ -344,14 +337,13 @@ class _FlashPageState extends State<FlashPage> {
   // Build
   // --------------------------------------------------------------------------
 
-  /// The chip picker for offline planning (it fixes the bootloader offset).
   Widget _chipPicker() => AppDropdown<EspChip?>(
         value: plan.chip,
         label: 'Chip',
-        hint: 'Unknown (no bootloader)',
-        width: 260,
+        hint: 'Unknown',
+        width: 200,
         entries: [
-          const DropdownMenuEntry(value: null, label: 'Unknown (no bootloader)'),
+          const DropdownMenuEntry(value: null, label: 'Unknown'),
           for (final c in EspChip.values) DropdownMenuEntry(value: c, label: c.name),
         ],
         onSelected: plan.setChip,
@@ -366,103 +358,42 @@ class _FlashPageState extends State<FlashPage> {
   @override
   Widget build(BuildContext context) {
     final offline = !session.connected;
-    final table = plan.table;
     final busy = session.busy;
     final scheme = Theme.of(context).colorScheme;
-    if (table == null) {
-      if (session.connected && busy && plan.deviceTable == null) return const LoadingState('Reading the partition table…');
-      if (offline && !_bare && plan.isEmpty) {
-        return EmptyState.noDevice(
-          message: 'Connect a device to plan changes to its flash, or open a partition table or bundle to plan without one. '
-              'The bootloader, Factory and OTA can be planned with no table at all.',
-          actions: [
-            FilledButton.tonalIcon(onPressed: _stageTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…')),
-            FilledButton.tonalIcon(onPressed: _loadBundle, icon: const Icon(Icons.unarchive_outlined), label: const Text('Open bundle…')),
-            FilledButton.tonalIcon(onPressed: () => setState(() => _bare = true), icon: const Icon(Icons.flash_on), label: const Text('Plan without a table')),
-            _chipPicker(),
-          ],
-        );
-      }
+    if (offline && !_started && plan.isEmpty && plan.fileTable == null) {
+      return EmptyState.noDevice(
+        message: 'Connect a device to plan changes to its flash, or start without one: open a partition table or bundle, '
+            'or plan just the bootloader and the app.',
+        actions: [
+          FilledButton.tonalIcon(
+              onPressed: () => _pick(_tableKey, extensions: ['csv', 'bin']), icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…')),
+          FilledButton.tonalIcon(onPressed: _loadBundle, icon: const Icon(Icons.unarchive_outlined), label: const Text('Open bundle…')),
+          FilledButton.tonalIcon(onPressed: () => setState(() => _started = true), icon: const Icon(Icons.flash_on), label: const Text('Start empty')),
+        ],
+      );
     }
+    if (session.connected && busy && plan.deviceTable == null && plan.isEmpty) return const LoadingState('Reading the partition table…');
     return ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        if (offline) _chipPicker(),
-        FilledButton.tonalIcon(onPressed: _stageTable, icon: const Icon(Icons.table_chart_outlined), label: Text(table == null ? 'Open partition table…' : 'Replace table…')),
-        FilledButton.tonalIcon(onPressed: _loadBundle, icon: const Icon(Icons.unarchive_outlined), label: Text(table == null ? 'Open bundle…' : 'Load bundle…')),
-        MenuAnchor(
-          builder: (context, controller, _) => OutlinedButton.icon(
-            onPressed: table == null ? null : () => controller.isOpen ? controller.close() : controller.open(),
-            icon: const Icon(Icons.download),
-            label: const Text('Table'),
-          ),
-          menuChildren: [
-            MenuItemButton(onPressed: () => saveText('partitions.csv', table!.toCsv(), mimeType: 'text/csv'), child: const Text('Save as CSV')),
-            MenuItemButton(onPressed: () => saveBytes('partition-table.bin', table!.toBinary()), child: const Text('Save as binary')),
-            MenuItemButton(onPressed: () => showText(context, title: 'Partition table', text: table!.format()), child: const Text('Show as text')),
-          ],
-        ),
+        FilledButton.tonalIcon(onPressed: _loadBundle, icon: const Icon(Icons.unarchive_outlined), label: const Text('Load bundle…')),
+        Text(
+            'Drag files onto rows, or use Write…, to queue operations. Several files dropped at once are matched by name, the way a bundle is. '
+            'Nothing touches the device until you flash.',
+            style: TextStyle(color: scheme.outline)),
       ]),
-      const SizedBox(height: 12),
-      if (plan.stagedTable != null)
-        MaterialBanner(
-          backgroundColor: plan.stagedTableProblem == null ? scheme.tertiaryContainer : scheme.errorContainer,
-          leading: Icon(plan.stagedTableProblem == null ? Icons.table_chart : Icons.error_outline),
-          content: Text(plan.stagedTableProblem == null
-              ? 'Planning on the staged table from ${plan.stagedTableSource}.'
-                  '${offline ? '' : ' The device keeps its own table until you flash; rows marked new, moved or resized are not where the device thinks they are.'}'
-              : 'Staged table from ${plan.stagedTableSource} FAILED verification: ${plan.stagedTableProblem}'),
-          actions: [TextButton(onPressed: () => _log(plan.unstageTable(), error: true), child: const Text('Discard table'))],
-        )
-      else if (table == null && session.connected && !busy)
-        MaterialBanner(
-          backgroundColor: scheme.errorContainer,
-          leading: const Icon(Icons.error_outline),
-          content: const Text('The partition table could not be read — see the log. Only the bootloader, Factory and OTA can be planned.'),
-          actions: [TextButton(onPressed: session.readLayout, child: const Text('Try again'))],
-        )
-      else
-        Row(children: [
-          Icon(Icons.file_download_outlined, size: 18, color: scheme.outline),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-                'Drag files onto rows, or use Write… and Erase, to queue operations. '
-                'Several files dropped at once are matched to rows by name, the way a bundle is. Nothing touches the device until you flash.',
-                style: TextStyle(color: scheme.outline)),
-          ),
-        ]),
       const SizedBox(height: 12),
       DropTarget(
         onDragUpdated: _onDragUpdated,
         onDragExited: _onDragExited,
         onDragDone: _onDragDone,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _targets(scheme),
+          _tableBox(scheme, busy),
           const SizedBox(height: 12),
-          if (table != null)
-            PartitionGrid(
-              rows: plan.rows,
-              table: table,
-              activeSlot: plan.stagedTable == null ? plan.otadata?.slot : null,
-              highlighted: _dragging,
-              rowKey: (p) => _rowKeys.putIfAbsent(p.name, GlobalKey.new),
-              rowColor: (p) => _rowColor(p.name, scheme, planned: plan.opFor(p.name) != null),
-              contents: (p) => _contents(p, scheme),
-              extraColumn: 'Planned',
-              extra: (p) => _plannedCell(p.name, plan.opFor(p.name)?.summary, plan.opFor(p.name)?.warning, at: p.offset.hex, onRemove: () => plan.unstage(p.name)),
-              actions: (p) => [
-                if (p.isPrimaryPartitionTable)
-                  TextButton.icon(onPressed: _stageTable, icon: const Icon(Icons.table_chart_outlined, size: 18), label: const Text('Replace…'))
-                else ...[
-                  TextButton.icon(onPressed: () => _pickWrite(p), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
-                  TextButton.icon(
-                      onPressed: () => _stageErase(p),
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      label: const Text('Erase'),
-                      style: TextButton.styleFrom(foregroundColor: scheme.error)),
-                ],
-              ],
-            ),
+          _bootloaderBox(scheme, offline),
+          const SizedBox(height: 12),
+          _appBox(scheme),
+          const SizedBox(height: 12),
+          _partitionsBox(scheme),
         ]),
       ),
       const SizedBox(height: 16),
@@ -474,79 +405,212 @@ class _FlashPageState extends State<FlashPage> {
           onSaveBundle: _saveBundle,
           onClear: plan.clear,
           onRemove: plan.unstage,
-          onRemoveRole: plan.unstageRole,
-          onDiscardTable: () => _log(plan.unstageTable(), error: true)),
+          onRemoveApp: plan.unstageApp,
+          onDiscardTable: () => plan.setTableUse(TableUse.reference)),
     ]);
   }
 
-  /// The role rows — Factory and OTA — and, with no table, the bootloader:
-  /// targets that exist regardless of any partition table.
-  Widget _targets(ColorScheme scheme) {
-    final table = plan.table;
-    final bootloader = table == null ? plan.rows.where((p) => p.isPrimaryBootloader).firstOrNull : null;
-    return Card(
-      shape: _dragging ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: scheme.primary, width: 2)) : null,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Text('Targets', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: scheme.outline)),
-        ),
-        for (final role in FlashRole.values)
-          _targetRow(
-            name: role.fileStem,
-            title: 'App → ${role.label}',
-            description: role.description,
-            planned: plan.roleFor(role)?.summary,
-            warning: plan.roleFor(role)?.warning,
-            onPick: () => _pickRole(role),
-            onRemove: () => plan.unstageRole(role),
-            scheme: scheme,
+  Widget _box(ColorScheme scheme, {required String title, Widget? trailing, required List<Widget> children}) => Card(
+        shape: _dragging ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: scheme.primary, width: 2)) : null,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(children: [
+              Expanded(child: Text(title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: scheme.outline))),
+              if (trailing != null) trailing,
+            ]),
           ),
-        if (bootloader != null)
-          _targetRow(
-            name: bootloader.name,
-            title: 'Bootloader',
-            description: 'Write at ${bootloader.offset.hex}, the ${plan.chip?.name ?? 'chip'}\'s bootloader offset',
-            planned: plan.opFor(bootloader.name)?.summary,
-            warning: plan.opFor(bootloader.name)?.warning,
-            onPick: () => _pickWrite(bootloader),
-            onRemove: () => plan.unstage(bootloader.name),
-            scheme: scheme,
-          ),
-        const SizedBox(height: 4),
+          ...children,
+          const SizedBox(height: 4),
+        ]),
+      );
+
+  /// One droppable row: a name, a description, what is planned, and the
+  /// controls on the right.
+  Widget _row({
+    required String key,
+    required Widget leading,
+    required Widget description,
+    required String? planned,
+    required String? warning,
+    required VoidCallback onRemove,
+    required List<Widget> actions,
+    Color? color,
+    ColorScheme? scheme,
+  }) {
+    scheme ??= Theme.of(context).colorScheme;
+    return Container(
+      key: _rowKeys.putIfAbsent(key, GlobalKey.new),
+      color: color ?? _rowColor(key, scheme, planned: planned != null),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(children: [
+        SizedBox(width: 200, child: leading),
+        Expanded(child: description),
+        const SizedBox(width: 16),
+        _plannedCell(key, planned, warning, onRemove: onRemove),
+        const SizedBox(width: 16),
+        ...actions,
       ]),
     );
   }
 
-  Widget _targetRow({
-    required String name,
-    required String title,
-    required String description,
-    required String? planned,
-    required String? warning,
-    required VoidCallback onPick,
-    required VoidCallback onRemove,
-    required ColorScheme scheme,
-  }) =>
-      Container(
-        key: _rowKeys.putIfAbsent(name, GlobalKey.new),
-        color: _rowColor(name, scheme, planned: planned != null),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Row(children: [
-          SizedBox(width: 180, child: Text(title, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13))),
-          Expanded(child: Text(description, style: TextStyle(color: scheme.outline))),
-          const SizedBox(width: 16),
-          _plannedCell(name, planned, warning, at: null, onRemove: onRemove),
-          const SizedBox(width: 16),
-          TextButton.icon(onPressed: onPick, icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
+  Widget _tableBox(ColorScheme scheme, bool busy) {
+    final table = plan.table;
+    final flash = plan.tableUse == TableUse.flash;
+    final sourceLabel = switch (plan.tableSource) {
+      TableSource.device =>
+        plan.deviceTable == null ? (session.connected ? 'Device (not read yet)' : 'Device (none connected)') : "Device (${plan.deviceTable!.length} partitions)",
+      TableSource.file => '${plan.fileTableSource} (${plan.fileTable!.length} partitions)',
+    };
+    final problem = plan.tableSource == TableSource.file ? plan.fileTableProblem : null;
+    return _box(scheme, title: 'Partition table', trailing: _tableMenu(table), children: [
+      _row(
+        key: _tableKey,
+        leading: Row(children: [
+          SegmentedButton<TableSource>(
+            segments: const [ButtonSegment(value: TableSource.device, label: Text('Device')), ButtonSegment(value: TableSource.file, label: Text('File'))],
+            selected: {plan.tableSource},
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            onSelectionChanged: (s) {
+              final source = s.single;
+              if (source == TableSource.file && plan.fileTable == null) {
+                _pick(_tableKey, extensions: ['csv', 'bin']);
+                return;
+              }
+              _log(plan.setTableSource(source), error: true);
+            },
+          ),
         ]),
+        description: Text.rich(TextSpan(children: [
+          TextSpan(text: sourceLabel),
+          if (problem != null) TextSpan(text: '  VERIFICATION FAILED: $problem', style: TextStyle(color: scheme.error)),
+          if (plan.tableSource == TableSource.file && plan.deviceTable != null && plan.fileTable != plan.deviceTable)
+            TextSpan(
+                text: '  — differs from the device; rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
+        ])),
+        planned: table == null ? null : (flash ? 'Write ${plan.tableSource == TableSource.file ? plan.fileTableSource : "the device's table"}' : 'Reference only'),
+        warning: flash ? problem : null,
+        onRemove: () => plan.setTableUse(TableUse.reference),
+        actions: [
+          SegmentedButton<TableUse>(
+            segments: const [ButtonSegment(value: TableUse.reference, label: Text('Reference')), ButtonSegment(value: TableUse.flash, label: Text('Flash'))],
+            selected: {plan.tableUse},
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            onSelectionChanged: table == null ? null : (s) => plan.setTableUse(s.single),
+          ),
+          TextButton.icon(onPressed: () => _pick(_tableKey, extensions: ['csv', 'bin']), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Open…')),
+          if (plan.fileTable != null) TextButton(onPressed: () => _log(plan.closeTableFile(), error: true), child: const Text('Close file')),
+        ],
+      ),
+    ]);
+  }
+
+  Widget _tableMenu(PartitionTable? table) => MenuAnchor(
+        builder: (context, controller, _) => TextButton.icon(
+          onPressed: table == null ? null : () => controller.isOpen ? controller.close() : controller.open(),
+          icon: const Icon(Icons.download, size: 18),
+          label: const Text('Export'),
+        ),
+        menuChildren: [
+          MenuItemButton(onPressed: () => saveText('partitions.csv', table!.toCsv(), mimeType: 'text/csv'), child: const Text('Save as CSV')),
+          MenuItemButton(onPressed: () => saveBytes('partition-table.bin', table!.toBinary()), child: const Text('Save as binary')),
+          MenuItemButton(onPressed: () => showText(context, title: 'Partition table', text: table!.format()), child: const Text('Show as text')),
+        ],
       );
 
-  /// What the device holds at this row, or, on a staged table, how the row
+  Widget _bootloaderBox(ColorScheme scheme, bool offline) {
+    final row = plan.bootloaderRow;
+    final op = plan.bootloaderOp;
+    return _box(scheme, title: 'Bootloader', trailing: offline ? _chipPicker() : null, children: [
+      _row(
+        key: row?.name ?? 'bootloader',
+        leading: const Text('bootloader.bin', style: TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+        description: Text(
+            row == null
+                ? 'Pick a chip to know the bootloader offset'
+                : 'Written at ${row.offset.hex}, the ${plan.chip?.name ?? 'chip'}\'s bootloader offset, whatever the table says',
+            style: TextStyle(color: scheme.outline)),
+        planned: op?.summary,
+        warning: op?.warning,
+        onRemove: () => plan.unstage(row!.name),
+        actions: [
+          TextButton.icon(onPressed: row == null ? null : () => _pick(row.name, extensions: ['bin']), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
+        ],
+      ),
+    ]);
+  }
+
+  Widget _appBox(ColorScheme scheme) {
+    final app = plan.app;
+    final role = plan.appRole;
+    final target = plan.appTarget;
+    return _box(scheme, title: 'App', children: [
+      _row(
+        key: _appKey,
+        leading: SegmentedButton<FlashRole>(
+          segments: const [ButtonSegment(value: FlashRole.factory, label: Text('Factory')), ButtonSegment(value: FlashRole.ota, label: Text('OTA'))],
+          selected: {role},
+          showSelectedIcon: false,
+          style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          onSelectionChanged: (s) => _log(plan.setAppRole(s.single)),
+        ),
+        description: Text('${role.fileStem}.bin → ${role.description}${target == null ? '' : ' ($target)'}', style: TextStyle(color: scheme.outline)),
+        planned: app == null ? null : 'Write ${app.name} (${app.bytes.length.bytesString})',
+        warning: plan.appWarning,
+        onRemove: plan.unstageApp,
+        actions: [
+          TextButton.icon(onPressed: () => _pick(_appKey, extensions: ['bin']), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
+        ],
+      ),
+    ]);
+  }
+
+  Widget _partitionsBox(ColorScheme scheme) {
+    final table = plan.table;
+    if (table == null) {
+      return _box(scheme, title: 'Partitions', children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Text(
+              session.connected
+                  ? 'The partition table has not been read — see the log, or open one above.'
+                  : 'Connect a device or open a partition table above to name partitions.',
+              style: TextStyle(color: scheme.outline)),
+        ),
+      ]);
+    }
+    return PartitionGrid(
+      rows: plan.partitionRows,
+      table: table,
+      activeSlot: plan.tableSource == TableSource.device ? plan.otadata?.slot : null,
+      highlighted: _dragging,
+      rowKey: (p) => _rowKeys.putIfAbsent(p.name, GlobalKey.new),
+      rowColor: (p) => plan.ownedByApp(p) ? scheme.surfaceContainerHighest.withValues(alpha: 0.5) : _rowColor(p.name, scheme, planned: plan.opFor(p.name) != null),
+      contents: (p) => _contents(p, scheme),
+      extraColumn: 'Planned',
+      extra: (p) => plan.ownedByApp(p)
+          ? Text('Handled by the ${plan.appRole.label} app', style: TextStyle(color: scheme.outline, fontStyle: FontStyle.italic))
+          : _plannedCell(p.name, plan.opFor(p.name)?.summary, plan.opFor(p.name)?.warning, onRemove: () => plan.unstage(p.name)),
+      actions: (p) => plan.ownedByApp(p)
+          ? const []
+          : [
+              TextButton.icon(onPressed: () => _pick(p.name), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
+              TextButton.icon(
+                  onPressed: () => _stageErase(p),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Erase'),
+                  style: TextButton.styleFrom(foregroundColor: scheme.error)),
+            ],
+    );
+  }
+
+  /// What the device holds at this row, or, on a file's table, how the row
   /// differs from the device.
   Widget _contents(PartitionDefinition p, ColorScheme scheme) {
     final device = plan.deviceTable;
-    if (plan.stagedTable != null && device != null && !p.isPrimaryBootloader && !p.isPrimaryPartitionTable) {
+    if (plan.tableSource == TableSource.file && device != null) {
       final was = device.findByName(p.name);
       final note = was == null
           ? 'new'
@@ -560,16 +624,26 @@ class _FlashPageState extends State<FlashPage> {
     return Text(appContents(plan.deviceApps, p));
   }
 
-  Widget _plannedCell(String name, String? planned, String? warning, {required String? at, required VoidCallback onRemove}) {
+  Widget _plannedCell(String name, String? planned, String? warning, {required VoidCallback onRemove}) {
     final scheme = Theme.of(context).colorScheme;
     if (_hoverRow == name) return Text('Drop to write', style: TextStyle(color: scheme.primary, fontStyle: FontStyle.italic));
     if (planned == null) return _dragging ? const SizedBox.shrink() : Text('—', style: TextStyle(color: scheme.outlineVariant));
+    final passive = planned == 'Reference only';
     return InputChip(
-      avatar: Icon(warning != null ? Icons.warning_amber : (planned.startsWith('Erase') ? Icons.delete_outline : Icons.upload_file),
-          size: 18, color: warning != null ? scheme.error : null),
+      avatar: Icon(
+        warning != null
+            ? Icons.warning_amber
+            : passive
+                ? Icons.visibility_outlined
+                : planned.startsWith('Erase')
+                    ? Icons.delete_outline
+                    : Icons.upload_file,
+        size: 18,
+        color: warning != null ? scheme.error : null,
+      ),
       label: Text(planned),
-      tooltip: warning ?? (at == null ? planned : '$planned at $at'),
-      onDeleted: onRemove,
+      tooltip: warning ?? planned,
+      onDeleted: passive ? null : onRemove,
       deleteButtonTooltipMessage: 'Remove from plan',
     );
   }
@@ -585,7 +659,7 @@ class _PlanPanel extends StatelessWidget {
     required this.onSaveBundle,
     required this.onClear,
     required this.onRemove,
-    required this.onRemoveRole,
+    required this.onRemoveApp,
     required this.onDiscardTable,
   });
   final FlashPlan plan;
@@ -595,7 +669,7 @@ class _PlanPanel extends StatelessWidget {
   final VoidCallback onSaveBundle;
   final VoidCallback onClear;
   final ValueChanged<String> onRemove;
-  final ValueChanged<FlashRole> onRemoveRole;
+  final VoidCallback onRemoveApp;
   final VoidCallback onDiscardTable;
 
   @override
@@ -603,11 +677,11 @@ class _PlanPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final bootloader = plan.bootloaderOp;
-    final ops = plan.orderedOps.where((op) => !op.partition.isPrimaryBootloader).toList();
+    final ops = plan.orderedOps;
     final erases = ops.where((op) => !op.isWrite).toList();
     final writes = ops.where((op) => op.isWrite).toList();
     final count = plan.length;
-    final bundleable = writes.isNotEmpty || bootloader != null || plan.roles.isNotEmpty || plan.stagedTable != null;
+    final bundleable = writes.isNotEmpty || bootloader != null || plan.app != null || plan.stagedTable != null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -624,26 +698,26 @@ class _PlanPanel extends StatelessWidget {
                 icon: plan.stagedTableProblem == null ? Icons.table_chart : Icons.error_outline,
                 name: 'partition_table',
                 detail: plan.partitionTableOffset.hex,
-                summary: 'Replace with ${plan.stagedTableSource} (written first)',
+                summary: 'Write ${plan.stagedTableSource} (first)',
                 warning: plan.stagedTableProblem == null ? null : 'Verification failed: ${plan.stagedTableProblem}',
                 onRemove: onDiscardTable,
               ),
             if (bootloader != null)
               _OpTile(
                   icon: Icons.upload_file,
-                  name: bootloader.partition.name,
+                  name: 'bootloader',
                   detail: bootloader.partition.offset.hex,
                   summary: bootloader.summary,
                   warning: bootloader.warning,
                   onRemove: () => onRemove(bootloader.partition.name)),
-            for (final r in plan.roles)
+            if (plan.app case final app?)
               _OpTile(
                   icon: Icons.system_update_alt,
-                  name: r.role.fileStem,
-                  detail: r.role.label,
-                  summary: 'Write ${r.file.name} (${r.file.bytes.length.bytesString}) — ${r.role.description.toLowerCase()}',
-                  warning: r.warning,
-                  onRemove: () => onRemoveRole(r.role)),
+                  name: plan.appRole.fileStem,
+                  detail: plan.appTarget ?? plan.appRole.label,
+                  summary: 'Write ${app.name} (${app.bytes.length.bytesString}) to ${plan.appRole.description}',
+                  warning: plan.appWarning,
+                  onRemove: onRemoveApp),
             for (final op in erases)
               _OpTile(
                   icon: Icons.delete_outline,
