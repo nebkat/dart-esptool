@@ -337,11 +337,12 @@ class _FlashPageState extends State<FlashPage> {
   // Build
   // --------------------------------------------------------------------------
 
-  Widget _chipPicker() => AppDropdown<EspChip?>(
+  Widget _chipPicker({bool enabled = true}) => AppDropdown<EspChip?>(
         value: plan.chip,
         label: 'Chip',
         hint: 'Unknown',
         width: 200,
+        enabled: enabled,
         entries: [
           const DropdownMenuEntry(value: null, label: 'Unknown'),
           for (final c in EspChip.values) DropdownMenuEntry(value: c, label: c.name),
@@ -444,8 +445,8 @@ class _FlashPageState extends State<FlashPage> {
       color: color ?? _rowColor(key, scheme, planned: planned != null),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(children: [
-        SizedBox(width: 200, child: leading),
-        const SizedBox(width: 16),
+        leading,
+        const SizedBox(width: 24),
         Expanded(child: description),
         const SizedBox(width: 16),
         _plannedCell(key, planned, warning, onRemove: onRemove),
@@ -459,15 +460,14 @@ class _FlashPageState extends State<FlashPage> {
     final table = plan.table;
     final flash = plan.tableUse == TableUse.flash;
     final sourceLabel = switch (plan.tableSource) {
-      TableSource.device =>
-        plan.deviceTable == null ? (session.connected ? 'Device (not read yet)' : 'Device (none connected)') : "Device (${plan.deviceTable!.length} partitions)",
+      TableSource.device => "Device's table (${plan.deviceTable?.length ?? 0} partitions)",
       TableSource.file => '${plan.fileTableSource} (${plan.fileTable!.length} partitions)',
     };
     final problem = plan.tableSource == TableSource.file ? plan.fileTableProblem : null;
     return _box(scheme, title: 'Partition table', children: [
       _row(
         key: _tableKey,
-        leading: Row(children: [
+        leading: Row(mainAxisSize: MainAxisSize.min, children: [
           SegmentedButton<TableSource>(
             segments: const [ButtonSegment(value: TableSource.device, label: Text('Device')), ButtonSegment(value: TableSource.file, label: Text('File'))],
             selected: {plan.tableSource},
@@ -482,18 +482,7 @@ class _FlashPageState extends State<FlashPage> {
               _log(plan.setTableSource(source), error: true);
             },
           ),
-        ]),
-        description: Text.rich(TextSpan(children: [
-          TextSpan(text: sourceLabel),
-          if (problem != null) TextSpan(text: '  VERIFICATION FAILED: $problem', style: TextStyle(color: scheme.error)),
-          if (plan.tableSource == TableSource.file && plan.deviceTable != null && plan.fileTable != plan.deviceTable)
-            TextSpan(
-                text: '  — differs from the device; rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
-        ])),
-        planned: table == null ? null : (flash ? 'Write ${plan.tableSource == TableSource.file ? plan.fileTableSource : "the device's table"}' : 'Reference only'),
-        warning: flash ? problem : null,
-        onRemove: () => plan.setTableUse(TableUse.reference),
-        actions: [
+          const SizedBox(width: 12),
           SegmentedButton<TableUse>(
             segments: const [ButtonSegment(value: TableUse.reference, label: Text('Reference')), ButtonSegment(value: TableUse.flash, label: Text('Flash'))],
             selected: {plan.tableUse},
@@ -502,8 +491,27 @@ class _FlashPageState extends State<FlashPage> {
             onSelectionChanged: table == null ? null : (s) => plan.setTableUse(s.single),
           ),
           IconButton(tooltip: 'What Reference and Flash mean', icon: const Icon(Icons.help_outline, size: 18), onPressed: _explainTableUse),
+        ]),
+        description: Text.rich(TextSpan(children: [
+          if (table == null) TextSpan(text: session.connected ? 'Not read yet' : 'Connect a device, or open a table file', style: TextStyle(color: scheme.outline)),
+          if (problem != null) TextSpan(text: 'VERIFICATION FAILED: $problem', style: TextStyle(color: scheme.error)),
+          if (plan.tableSource == TableSource.file && plan.deviceTable != null && plan.fileTable != plan.deviceTable)
+            TextSpan(
+                text: '  — differs from the device; rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
+        ])),
+        planned: table == null ? null : (flash ? 'Write ${plan.tableSource == TableSource.file ? plan.fileTableSource : "the device's table"}' : 'Reference only'),
+        warning: flash ? problem : null,
+        onRemove: () => plan.setTableUse(TableUse.reference),
+        actions: [
+          if (table != null)
+            InputChip(
+              avatar: const Icon(Icons.table_chart_outlined, size: 18),
+              label: Text(sourceLabel),
+              tooltip: plan.tableSource == TableSource.file ? "Close the file and go back to the device's table" : 'The table read from the device',
+              onDeleted: plan.tableSource == TableSource.file ? () => _log(plan.closeTableFile(), error: true) : null,
+              deleteButtonTooltipMessage: 'Close file',
+            ),
           TextButton.icon(onPressed: () => _pick(_tableKey, extensions: ['csv', 'bin']), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Open…')),
-          if (plan.fileTable != null) TextButton(onPressed: () => _log(plan.closeTableFile(), error: true), child: const Text('Close file')),
         ],
       ),
     ]);
@@ -536,7 +544,7 @@ class _FlashPageState extends State<FlashPage> {
     return _box(scheme, title: 'Bootloader', children: [
       _row(
         key: row?.name ?? 'bootloader',
-        leading: offline ? _chipPicker() : Text(plan.chip?.name ?? '', style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+        leading: offline ? _chipPicker() : Tooltip(message: 'The chip is the connected device\'s; disconnect to plan for another', child: _chipPicker(enabled: false)),
         description: Text(
             row == null
                 ? 'Pick a chip to know the bootloader offset'
