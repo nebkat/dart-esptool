@@ -166,8 +166,9 @@ class _InspectPageState extends State<InspectPage> {
         ],
       FileKind.nvsImage => [
           if (widget.onOpenData != null) FilledButton.tonalIcon(onPressed: () => widget.onOpenData!(i.file), icon: const Icon(Icons.storage), label: const Text('Open in Data')),
-          OutlinedButton.icon(
-              onPressed: () => saveText('${i.stem}.csv', nvsToCsv(i.nvs!.entries), mimeType: 'text/csv'), icon: const Icon(Icons.download), label: const Text('Save as CSV')),
+          if (!i.nvs!.looksEncrypted)
+            OutlinedButton.icon(
+                onPressed: () => saveText('${i.stem}.csv', nvsToCsv(i.nvs!.entries), mimeType: 'text/csv'), icon: const Icon(Icons.download), label: const Text('Save as CSV')),
         ],
       FileKind.nvsCsv => [
           if (widget.onOpenData != null) FilledButton.tonalIcon(onPressed: () => widget.onOpenData!(i.file), icon: const Icon(Icons.storage), label: const Text('Open in Data')),

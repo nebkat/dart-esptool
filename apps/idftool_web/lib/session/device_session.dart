@@ -79,6 +79,15 @@ class DeviceSession extends ChangeNotifier {
   ResetChoice reset = ResetChoice.auto;
   bool useStub = true;
 
+  /// Keys for encrypted NVS partitions, derived from the HMAC key entered
+  /// this session. Held in memory only — never saved.
+  NvsKeys? nvsKeys;
+
+  void setNvsKeys(NvsKeys? keys) {
+    nvsKeys = keys;
+    notifyListeners();
+  }
+
   SessionState state = SessionState.disconnected;
   WebSerialTransport? _transport;
   EspLoader? _loader;

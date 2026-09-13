@@ -106,6 +106,7 @@ class _OneClickPageState extends State<OneClickPage> {
             _currentStep = i;
           }),
           onProgress: session.reportProgress,
+          nvsKeys: session.nvsKeys,
           log: session.addLog,
         );
         _completed.add(_currentStep);

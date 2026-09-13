@@ -11,14 +11,29 @@ import '../widgets/dropdown.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/fs_browser.dart';
 import '../widgets/nvs_editor.dart';
+import '../widgets/nvs_key_dialog.dart';
 import '../widgets/partition_item.dart';
 
-/// What the page is showing: an NVS image to edit, or a filesystem to browse.
+/// What the page is showing: an NVS image to edit, an encrypted one waiting
+/// for its key, or a filesystem to browse.
 sealed class _Content {}
 
 class _Nvs extends _Content {
-  _Nvs(this.image);
+  _Nvs(this.image, {this.keys});
+
+  /// Plaintext, whether or not the source was encrypted.
   final NvsImage image;
+
+  /// The keys the source is encrypted with, if it is: edits and saved images
+  /// are encrypted with them again.
+  final NvsKeys? keys;
+}
+
+class _LockedNvs extends _Content {
+  _LockedNvs(this.data);
+
+  /// The encrypted image as read.
+  final Uint8List data;
 }
 
 class _Fs extends _Content {
@@ -124,11 +139,9 @@ class _DataPageState extends State<DataPage> {
     await session.runDevice('Read ${partition.name}', (device) async {
       final _Content content;
       if (_isNvs(partition)) {
-        final (partition: _, image: image) = await device.readNvs(name: partition.name, onProgress: session.reportProgress);
-        for (final e in image.errors) {
-          session.addLog('NVS: $e', error: true);
-        }
-        content = _Nvs(image);
+        final (partition: _, image: raw) = await device.readNvs(name: partition.name, onProgress: session.reportProgress);
+        content = _nvsContent(raw.data);
+        _logNvs(content);
       } else {
         final (partition: _, volume: volume) = await device.readFs(name: partition.name, type: _typeOverride, onProgress: session.reportProgress);
         for (final e in volume.errors) {
@@ -157,7 +170,7 @@ class _DataPageState extends State<DataPage> {
     final _Content content;
     try {
       if (looksLikeNvsBinary(file.bytes)) {
-        content = _Nvs(parseNvs(file.bytes));
+        content = _nvsContent(file.bytes);
       } else if (_nvsCsv(file.bytes) case final csv?) {
         content = _Nvs(parseNvs(_buildNvs(csv)));
       } else {
@@ -168,12 +181,12 @@ class _DataPageState extends State<DataPage> {
       session.addLog('Could not open ${file.name}: $e', error: true);
       return;
     }
+    _logNvs(content);
     switch (content) {
-      case _Nvs(:final image):
-        for (final e in image.errors) {
-          session.addLog('NVS: $e', error: true);
-        }
-        session.addLog('Opened ${file.name}: NVS, ${image.entries.length} entries, ${image.data.length.bytesString}');
+      case _Nvs(:final image, :final keys):
+        session.addLog('Opened ${file.name}: ${keys != null ? 'encrypted ' : ''}NVS, ${image.entries.length} entries, ${image.data.length.bytesString}');
+      case _LockedNvs(:final data):
+        session.addLog('Opened ${file.name}: encrypted NVS, ${data.length.bytesString}');
       case _Fs(:final volume):
         for (final e in volume.errors) {
           session.addLog('${volume.type.label}: $e', error: true);
@@ -199,12 +212,12 @@ class _DataPageState extends State<DataPage> {
     return first.toLowerCase().startsWith('key,type,encoding') ? text : null;
   }
 
-  static Uint8List _buildNvs(String csv, {int? size}) {
-    if (size != null) return generateNvsImage(csv, size);
+  static Uint8List _buildNvs(String csv, {int? size, NvsKeys? keys}) {
+    if (size != null) return generateNvsImage(csv, size, keys: keys);
     Object? lastError;
     for (final s in const [0x6000, 0x10000, 0x40000, 0x100000, 0x400000]) {
       try {
-        return generateNvsImage(csv, s);
+        return generateNvsImage(csv, s, keys: keys);
       } catch (e) {
         lastError = e;
       }
@@ -213,19 +226,83 @@ class _DataPageState extends State<DataPage> {
   }
 
   // --------------------------------------------------------------------------
+  // Encryption
+  // --------------------------------------------------------------------------
+
+  /// An NVS image as content: decrypted with the session's key when it is
+  /// encrypted and the key fits, locked when not. A blank image counts as
+  /// encrypted whenever a key is set, so that what is written to it is.
+  _Content _nvsContent(Uint8List data) {
+    final keys = session.nvsKeys;
+    if (looksEncryptedNvs(data)) {
+      if (keys == null) return _LockedNvs(data);
+      try {
+        return _Nvs(parseNvs(decryptNvs(data, keys)), keys: keys);
+      } on NvsError {
+        return _LockedNvs(data);
+      }
+    }
+    final image = parseNvs(data);
+    return _Nvs(image, keys: keys != null && image.entries.isEmpty && image.errors.isEmpty ? keys : null);
+  }
+
+  void _logNvs(_Content content) {
+    switch (content) {
+      case _Nvs(:final image):
+        for (final e in image.errors) {
+          session.addLog('NVS: $e', error: true);
+        }
+      case _LockedNvs():
+        session.addLog(
+            session.nvsKeys == null ? 'NVS: the image is encrypted — enter its HMAC key' : 'NVS: the image is encrypted, and the HMAC key entered does not decrypt it',
+            error: true);
+      case _Fs():
+    }
+  }
+
+  Future<void> _unlock() async {
+    final locked = _content;
+    if (locked is! _LockedNvs) return;
+    final keys = await askNvsHmacKey(context, image: locked.data);
+    if (keys == null || !mounted) return;
+    session.setNvsKeys(keys);
+    final content = _nvsContent(locked.data);
+    _logNvs(content);
+    setState(() => _content = content);
+  }
+
+  /// Forget the session's key and lock the image again.
+  void _forgetKey() {
+    final content = _content;
+    session.setNvsKeys(null);
+    if (content is _Nvs && content.keys != null) {
+      setState(() => _content = _nvsContent(encryptNvs(content.image.data, content.keys!)));
+    }
+  }
+
+  /// Save a plaintext image encrypted, asking for a key if there is none yet.
+  Future<void> _saveEncrypted(NvsImage image) async {
+    final keys = session.nvsKeys ?? await askNvsHmacKey(context);
+    if (keys == null || !mounted) return;
+    session.setNvsKeys(keys);
+    await saveBytes('$_stem-encrypted.bin', encryptNvs(image.data, keys));
+  }
+
+  // --------------------------------------------------------------------------
   // Writes
   // --------------------------------------------------------------------------
 
   /// Apply NVS edits: to the device partition, or in memory for a file.
   Future<bool> _applyNvs(List<NvsEdit> edits) async {
-    final image = (_content as _Nvs).image;
+    final nvs = _content as _Nvs;
+    final image = nvs.image;
     if (_fromFile) {
       try {
         final result = applyNvsEdits(image.data, resolveUntypedNvsEdits(image, edits));
         for (final c in result.changes) {
           session.addLog(describeNvsChange(c));
         }
-        setState(() => _content = _Nvs(parseNvs(result.image)));
+        setState(() => _content = _Nvs(parseNvs(result.image), keys: nvs.keys));
         session.addLog('Applied ${edits.length} change${edits.length == 1 ? '' : 's'} to $_source; save it with CSV or Image');
         return true;
       } catch (e) {
@@ -234,7 +311,7 @@ class _DataPageState extends State<DataPage> {
       }
     }
     final result = await session.runDevice(
-        'Write ${edits.length} NVS change${edits.length == 1 ? '' : 's'}', (device) => device.editNvs(edits, partitionName: _partition!.name, onProgress: session.reportProgress));
+        'Write ${edits.length} NVS change${edits.length == 1 ? '' : 's'}', (device) => device.editNvs(edits, partitionName: _partition!.name, keys: nvs.keys, onProgress: session.reportProgress));
     if (result != null) {
       for (final c in result.result.changes) {
         session.addLog(describeNvsChange(c));
@@ -255,12 +332,16 @@ class _DataPageState extends State<DataPage> {
     final file = await pickFile();
     if (file == null || !mounted) return;
     if (_isNvs(p)) {
+      // An encrypted partition gets an encrypted image: a plaintext file or CSV is encrypted
+      // with the key it was decrypted with, and an already encrypted file goes as it is.
+      final content = _content;
+      final keys = content is _Nvs ? content.keys : null;
       final Uint8List image;
       try {
         if (looksLikeNvsBinary(file.bytes)) {
-          image = file.bytes;
+          image = keys == null || looksEncryptedNvs(file.bytes) ? file.bytes : encryptNvs(file.bytes, keys);
         } else if (_nvsCsv(file.bytes) case final csv?) {
-          image = _buildNvs(csv, size: p.size);
+          image = _buildNvs(csv, size: p.size, keys: keys);
         } else {
           throw 'not an NVS image or CSV';
         }
@@ -268,7 +349,12 @@ class _DataPageState extends State<DataPage> {
         session.addLog('Cannot write ${file.name} to ${p.name}: $e', error: true);
         return;
       }
-      if (!await confirm(context, title: 'Replace ${p.name}?', message: 'Replace the whole ${p.name} partition with ${file.name}.', destructive: true)) return;
+      final note = switch (content) {
+        _Nvs(keys: _?) => '\n\nIt is written encrypted with the HMAC key entered.',
+        _LockedNvs() when !looksEncryptedNvs(file.bytes) => '\n\nThe partition is encrypted, but no HMAC key is entered: the image is written unencrypted.',
+        _ => '',
+      };
+      if (!await confirm(context, title: 'Replace ${p.name}?', message: 'Replace the whole ${p.name} partition with ${file.name}.$note', destructive: true)) return;
       await session.runDevice('Write ${file.name} to ${p.name}', (d) => d.writeNvs(image, partitionName: p.name, onProgress: session.reportProgress));
     } else {
       final type = FsType.detect(file.bytes);
@@ -386,12 +472,27 @@ class _DataPageState extends State<DataPage> {
           _openButton(busy),
           if (content is _Fs || !connected) _typePicker(),
           switch (content) {
-            _Nvs(:final image) => Wrap(spacing: 8, runSpacing: 8, children: [
+            _Nvs(:final image, :final keys) => Wrap(spacing: 8, runSpacing: 8, children: [
                 OutlinedButton.icon(
                     onPressed: () => saveText('$_stem.csv', nvsToCsv(image.entries), mimeType: 'text/csv'), icon: const Icon(Icons.download), label: const Text('CSV')),
-                OutlinedButton.icon(onPressed: () => saveBytes('$_stem.bin', image.data), icon: const Icon(Icons.download), label: const Text('Image')),
+                OutlinedButton.icon(
+                    onPressed: () => saveBytes('$_stem.bin', keys == null ? image.data : encryptNvs(image.data, keys)),
+                    icon: const Icon(Icons.download),
+                    label: Text(keys == null ? 'Image' : 'Encrypted image')),
+                if (keys != null)
+                  OutlinedButton.icon(onPressed: () => saveBytes('$_stem-decrypted.bin', image.data), icon: const Icon(Icons.download), label: const Text('Decrypted image'))
+                else
+                  OutlinedButton.icon(onPressed: () => _saveEncrypted(image), icon: const Icon(Icons.lock_outline), label: const Text('Encrypted image…')),
                 OutlinedButton.icon(
                     onPressed: () => showText(context, title: 'NVS pages', text: '${formatNvsPages(image)}\n\n${formatNvsEntries(image.entries)}'),
+                    icon: const Icon(Icons.article_outlined),
+                    label: const Text('Pages')),
+                if (session.nvsKeys != null) TextButton.icon(onPressed: _forgetKey, icon: const Icon(Icons.key_off), label: const Text('Forget key')),
+              ]),
+            _LockedNvs(:final data) => Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(onPressed: () => saveBytes('$_stem.bin', data), icon: const Icon(Icons.download), label: const Text('Image')),
+                OutlinedButton.icon(
+                    onPressed: () => showText(context, title: 'NVS pages', text: formatNvsPages(parseNvs(data))),
                     icon: const Icon(Icons.article_outlined),
                     label: const Text('Pages')),
               ]),
@@ -421,7 +522,16 @@ class _DataPageState extends State<DataPage> {
       ),
       Expanded(
         child: switch (content) {
-          _Nvs(:final image) => NvsEditor(key: ObjectKey(image), image: image, sourceLabel: _sourceLabel, busy: busy, fromFile: _fromFile, onApply: _applyNvs),
+          _Nvs(:final image, :final keys) =>
+            NvsEditor(key: ObjectKey(image), image: image, sourceLabel: _sourceLabel, busy: busy, fromFile: _fromFile, encrypted: keys != null, onApply: _applyNvs),
+          _LockedNvs() => EmptyState(
+              icon: Icons.lock_outline,
+              title: 'Encrypted NVS',
+              message: session.nvsKeys == null
+                  ? '$_sourceLabel is encrypted. Enter the HMAC key its encryption keys are derived from to read and edit it.'
+                  : '$_sourceLabel is encrypted, and the HMAC key entered does not decrypt it.',
+              actions: [FilledButton.tonalIcon(onPressed: _unlock, icon: const Icon(Icons.key), label: const Text('Enter HMAC key…'))],
+            ),
           _Fs(:final volume, :final size) =>
             FsBrowser(key: ObjectKey(volume), volume: volume, sourceLabel: _sourceLabel, imageSize: size, onError: (m) => session.addLog(m, error: true)),
         },

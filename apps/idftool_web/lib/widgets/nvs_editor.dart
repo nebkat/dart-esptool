@@ -8,10 +8,15 @@ import 'type_chip.dart';
 /// pending adds, changes and deletes queued until [onApply] takes them.
 /// Give it a new [key] when the image changes so the queue resets.
 class NvsEditor extends StatefulWidget {
-  const NvsEditor({super.key, required this.image, required this.sourceLabel, required this.busy, required this.fromFile, required this.onApply});
+  const NvsEditor(
+      {super.key, required this.image, required this.sourceLabel, required this.busy, required this.fromFile, this.encrypted = false, required this.onApply});
   final NvsImage image;
   final String sourceLabel;
   final bool busy;
+
+  /// Whether the image is encrypted on flash (or in its file) and was
+  /// decrypted with the session's key; edits are encrypted again.
+  final bool encrypted;
 
   /// Whether the image is an opened file (edits apply in memory) rather
   /// than a device partition (edits are written).
@@ -58,6 +63,11 @@ class _NvsEditorState extends State<NvsEditor> {
     final pending = {for (final e in _edits) e.qualified: e};
     return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), children: [
       Row(children: [
+        if (widget.encrypted)
+          const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: Tooltip(message: 'Encrypted NVS, decrypted with the HMAC key; changes are encrypted again', child: Icon(Icons.lock_outline, size: 20)),
+          ),
         Expanded(
           child: Text('${widget.sourceLabel}: ${image.entries.length} entries in ${image.namespaces.length} namespace${image.namespaces.length == 1 ? '' : 's'}, '
               'NVS v${image.version == NvsVersion.v1 ? 1 : 2}, ${image.pages.where((p) => !p.isUninit).length}/${image.pages.length} pages used'),

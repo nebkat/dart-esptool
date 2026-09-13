@@ -129,6 +129,15 @@ Future<Inspected> inspectFile(PickedFile file) async {
   if (looksLikeNvsBinary(bytes)) {
     final nvs = parseNvs(bytes);
     final used = nvs.pages.where((p) => !p.isUninit).length;
+    if (nvs.looksEncrypted) {
+      return Inspected(
+        kind: FileKind.nvsImage,
+        file: file,
+        summary: 'Encrypted NVS, $used/${nvs.pages.length} pages used — open it in Data and enter its HMAC key to read it',
+        report: formatNvsPages(nvs),
+        nvs: nvs,
+      );
+    }
     return Inspected(
       kind: FileKind.nvsImage,
       file: file,
