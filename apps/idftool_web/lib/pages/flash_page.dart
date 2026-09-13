@@ -489,7 +489,6 @@ class _FlashPageState extends State<FlashPage> {
     final sourceLabel = switch (plan.tableSource) {
       TableSource.device => "Device's table (${plan.deviceTable?.length ?? 0} partitions)",
       TableSource.file => '${plan.fileTableSource} (${plan.fileTable!.length} partitions)',
-      TableSource.none => 'None',
     };
     final problem = plan.tableSource == TableSource.file ? plan.fileTableProblem : null;
     return _box(scheme, title: 'Partition table', children: [
@@ -498,8 +497,7 @@ class _FlashPageState extends State<FlashPage> {
         leading: Row(mainAxisSize: MainAxisSize.min, children: [
           SegmentedButton<TableSource>(
             segments: [
-              ButtonSegment(value: TableSource.none, label: const Text('None'), enabled: !session.connected),
-              ButtonSegment(value: TableSource.device, label: const Text('Device'), enabled: session.connected),
+              const ButtonSegment(value: TableSource.device, label: Text('Device')),
               const ButtonSegment(value: TableSource.file, label: Text('File')),
             ],
             selected: {plan.tableSource},
@@ -520,15 +518,17 @@ class _FlashPageState extends State<FlashPage> {
             selected: {plan.tableUse},
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            onSelectionChanged: table == null || plan.tableSource == TableSource.none ? null : (s) => plan.setTableUse(s.single),
+            onSelectionChanged: table == null ? null : (s) => plan.setTableUse(s.single),
           ),
           IconButton(tooltip: 'What Reference and Flash mean', icon: const Icon(Icons.help_outline, size: 18), onPressed: _explainTableUse),
         ]),
         description: Text.rich(TextSpan(children: [
-          if (plan.tableSource == TableSource.none)
-            TextSpan(text: 'No table: partitions are named by their file, or by hand', style: TextStyle(color: scheme.outline))
-          else if (table == null)
-            TextSpan(text: session.connected ? 'Not read yet' : 'Connect a device, or open a table file', style: TextStyle(color: scheme.outline)),
+          if (plan.byName)
+            TextSpan(
+                text: session.connected
+                    ? 'Not read from the device yet: partitions are named by their file, or by hand'
+                    : 'No device yet: partitions are named by their file, or by hand, and line up when one connects',
+                style: TextStyle(color: scheme.outline)),
           if (problem != null) TextSpan(text: 'VERIFICATION FAILED: $problem', style: TextStyle(color: scheme.error)),
           if (plan.tableSource == TableSource.file && plan.deviceTable != null && plan.fileTable != plan.deviceTable)
             TextSpan(text: 'Differs from the device: rows below marked new, moved or resized are not where the device thinks they are', style: TextStyle(color: scheme.outline)),
@@ -582,7 +582,7 @@ class _FlashPageState extends State<FlashPage> {
         description: Text(
             row == null
                 ? 'Pick a chip to know the bootloader offset'
-                : 'Written at ${row.offset.hex}, the ${plan.chip?.name ?? 'chip'}\'s bootloader offset, whatever the table says',
+                : 'Written at ${row.offset.hex}, the ${plan.chip?.name ?? 'chip'}\'s bootloader offset, regardless of the partition table',
             style: TextStyle(color: scheme.outline)),
         planned: op?.summary,
         warning: op?.warning,
@@ -622,7 +622,7 @@ class _FlashPageState extends State<FlashPage> {
   Widget _partitionsBox(ColorScheme scheme) {
     final table = plan.table;
     if (table == null) {
-      final byName = plan.tableSource == TableSource.none;
+      final byName = plan.byName;
       return _box(
         scheme,
         title: 'Partitions',
@@ -637,9 +637,7 @@ class _FlashPageState extends State<FlashPage> {
                     ? (_hoverRow == _partitionsKey
                         ? 'Drop to add, named after the file'
                         : 'Drop files here, or add them; each is written to the partition named after it, and the name can be changed.')
-                    : session.connected
-                        ? 'The partition table has not been read — see the log, or open one above.'
-                        : 'Open a partition table above, or choose None to name partitions by file.',
+                    : 'Open a partition table above, or switch to Device to name partitions by file.',
                 style: TextStyle(color: byName && _hoverRow == _partitionsKey ? scheme.primary : scheme.outline)),
           ),
           ..._manualRows(scheme),

@@ -54,9 +54,10 @@ class ManualWrite {
   String get summary => 'Write ${file.name} (${file.bytes.length.bytesString})';
 }
 
-/// Where the partition table being planned against comes from. [none]
-/// plans by name alone, for a bundle or a device not connected yet.
-enum TableSource { device, file, none }
+/// Where the partition table being planned against comes from. [device]
+/// with nothing connected (or read) plans by name alone, for a bundle or
+/// a device not connected yet; the names line up when one is.
+enum TableSource { device, file }
 
 /// Whether that table is written too, or only names the partitions.
 enum TableUse { reference, flash }
@@ -81,7 +82,7 @@ class FlashPlan extends ChangeNotifier {
   PartitionTable? _fileTable;
   String? _fileTableSource;
   String? _fileTableProblem;
-  TableSource _tableSource = TableSource.none;
+  TableSource _tableSource = TableSource.device;
   TableUse _tableUse = TableUse.reference;
 
   final _ops = <String, PlannedOp>{};
@@ -127,7 +128,6 @@ class FlashPlan extends ChangeNotifier {
     _deviceTable = null;
     _deviceApps = const {};
     _otadata = null;
-    if (_tableSource == TableSource.none) _tableSource = TableSource.device;
     final notes = _reconcile();
     notifyListeners();
     return notes;
@@ -147,7 +147,6 @@ class FlashPlan extends ChangeNotifier {
         if (op.isWrite) _manual.add(ManualWrite(op.partition.name, op.file!));
         _ops.remove(op.partition.name);
       }
-      _tableSource = TableSource.none;
     }
     _reconcile();
     notifyListeners();
@@ -178,11 +177,11 @@ class FlashPlan extends ChangeNotifier {
   String? get fileTableProblem => _fileTableProblem;
 
   /// The table named partitions are planned against (`null` under [TableSource.none]).
-  PartitionTable? get table => switch (_tableSource) {
-        TableSource.file => _fileTable,
-        TableSource.device => _deviceTable,
-        TableSource.none => null,
-      };
+  PartitionTable? get table => _tableSource == TableSource.file ? _fileTable : _deviceTable;
+
+  /// Planning by name alone: the device is the source but there is no
+  /// table from it (nothing connected, or not read).
+  bool get byName => _tableSource == TableSource.device && _deviceTable == null;
 
   /// The table that will be written and put in the bundle, if any.
   PartitionTable? get stagedTable => _tableUse == TableUse.flash ? table : null;
@@ -213,8 +212,8 @@ class FlashPlan extends ChangeNotifier {
 
   List<String> setTableSource(TableSource source) {
     if (source == TableSource.file && _fileTable == null) return const [];
-    if (source == TableSource.none) _tableUse = TableUse.reference;
     _tableSource = source;
+    if (table == null) _tableUse = TableUse.reference;
     final notes = _reconcile();
     notifyListeners();
     return notes;
@@ -230,7 +229,7 @@ class FlashPlan extends ChangeNotifier {
     _fileTable = null;
     _fileTableSource = null;
     _fileTableProblem = null;
-    _tableSource = _connected ? TableSource.device : TableSource.none;
+    _tableSource = TableSource.device;
     _tableUse = TableUse.reference;
     final notes = _reconcile();
     notifyListeners();
@@ -247,7 +246,7 @@ class FlashPlan extends ChangeNotifier {
   /// One line saying what named partitions resolve against, and so whether
   /// a bundle of this plan carries a table or relies on the device's.
   String get addressing {
-    if (_tableSource == TableSource.none) {
+    if (byName) {
       return "Partitions are named freely (a file's name by default) and checked against the device's table when flashing; a bundle of this plan carries no table.";
     }
     if (table == null) return 'No partition table: only the bootloader and the app can be planned until one is read from a device or opened.';
@@ -416,8 +415,8 @@ class FlashPlan extends ChangeNotifier {
   // Writes by name alone
   // --------------------------------------------------------------------------
 
-  /// Writes waiting for a table with their name (all of them under
-  /// [TableSource.none]; the unmatched ones otherwise).
+  /// Writes waiting for a table with their name (all of them while
+  /// [byName]; the unmatched ones otherwise).
   List<ManualWrite> get manual => List.unmodifiable(_manual);
 
   /// Queue [file] for the partition called [name] (the file's stem by
