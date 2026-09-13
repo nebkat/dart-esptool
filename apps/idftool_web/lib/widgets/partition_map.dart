@@ -24,7 +24,7 @@ class PartitionMap extends StatelessWidget {
   final ValueChanged<PartitionDefinition>? onTap;
 
   static const _height = 46.0;
-  static const _minPartitionWidth = 30.0;
+  static const _minPartitionWidth = 10.0;
   static const _minGapWidth = 3.0;
 
   @override
