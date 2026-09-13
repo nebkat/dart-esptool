@@ -30,7 +30,7 @@ class _FilesystemPageState extends State<FilesystemPage> {
   String? _sourceLabel;
   int? _imageSize;
   FsType? _typeOverride;
-  bool _loadedFor = false;
+  bool _listedFor = false;
   final _collapsed = <String>{};
 
   /// The file shown in the right-hand pane, its bytes, and whether it is
@@ -42,22 +42,58 @@ class _FilesystemPageState extends State<FilesystemPage> {
   DeviceSession get session => widget.session;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (session.connected && !_loadedFor && !session.busy) {
-      _loadedFor = true;
-      _load();
+  void initState() {
+    super.initState();
+    session.addListener(_onSessionChanged);
+    _onSessionChanged();
+  }
+
+  @override
+  void dispose() {
+    session.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  /// On connect, list the filesystem partitions; nothing is read until one
+  /// is picked, unless the page was opened for a specific partition.
+  void _onSessionChanged() {
+    if (!mounted) return;
+    if (session.connected && !_listedFor && !session.busy) {
+      _listedFor = true;
+      Future<void>.microtask(_listPartitions);
     }
-    if (!session.connected) _loadedFor = false;
+    if (!session.connected && _listedFor) {
+      _listedFor = false;
+      setState(() {
+        _fsPartitions = const [];
+        _partition = null;
+      });
+    }
+  }
+
+  Future<void> _listPartitions() async {
+    final partitions = await session.runDevice('List filesystem partitions',
+        (device) async => (await device.partitionTable()).where((p) => FsType.forPartition(p) != null).toList());
+    if (partitions == null || !mounted) return;
+    setState(() => _fsPartitions = partitions);
+    if (partitions.isEmpty) session.addLog('No filesystem partition in the partition table', error: true);
+    final wanted = partitions.where((p) => p.name == widget.initialPartition).firstOrNull;
+    if (wanted != null) await _read(wanted);
   }
 
   Future<void> _load() async {
-    await session.runDevice('Read filesystem', (device) async {
-      final table = await device.partitionTable();
-      final partitions = table.where((p) => FsType.forPartition(p) != null).toList();
-      final wanted = _partition?.name ?? widget.initialPartition;
-      final partition = partitions.where((p) => p.name == wanted).firstOrNull ?? partitions.firstOrNull;
-      if (partition == null) throw IdfToolException('No filesystem partition in the partition table');
+    final p = _partition;
+    if (p != null) await _read(p);
+  }
+
+  Future<void> _read(PartitionDefinition partition) async {
+    setState(() {
+      _partition = partition;
+      _volume = null;
+      _selected = null;
+      _selectedBytes = null;
+    });
+    await session.runDevice('Read ${partition.name}', (device) async {
       final (partition: _, volume: volume) =
           await device.readFs(name: partition.name, type: _typeOverride, onProgress: session.reportProgress);
       for (final e in volume.errors) {
@@ -66,14 +102,10 @@ class _FilesystemPageState extends State<FilesystemPage> {
       session.addLog('${partition.name}: ${volume.describe()}, ${volume.entries.where((e) => !e.isDir).length} files');
       if (mounted) {
         setState(() {
-          _fsPartitions = partitions;
-          _partition = partition;
           _volume = volume;
           _sourceLabel = "partition '${partition.name}'";
           _imageSize = partition.size;
           _collapsed.clear();
-          _selected = null;
-          _selectedBytes = null;
         });
       }
     });
@@ -189,28 +221,24 @@ class _FilesystemPageState extends State<FilesystemPage> {
   Widget build(BuildContext context) {
     final volume = _volume;
     final busy = session.busy;
-    final theme = Theme.of(context);
     final canBuild = _partition != null && (FsType.forPartition(_partition!) ?? _typeOverride) != FsType.littlefs;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), child: Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (session.connected) ...[
-          if (_fsPartitions.length > 1)
-            DropdownButton<PartitionDefinition>(
-              value: _partition,
-              items: [
-                for (final p in _fsPartitions)
-                  DropdownMenuItem(value: p, child: Text('${p.name} (${p.subtypeName}, ${p.size.bytesString})')),
-              ],
-              onChanged: busy
-                  ? null
-                  : (p) {
-                      _partition = p;
-                      _load();
-                    },
-            )
-          else if (_partition != null)
-            Text('${_partition!.name} (${_partition!.subtypeName}, ${_partition!.size.bytesString})', style: theme.textTheme.titleMedium),
-          FilledButton.tonalIcon(onPressed: busy ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
+          DropdownButton<PartitionDefinition>(
+            value: _partition,
+            hint: Text(_fsPartitions.isEmpty ? 'No filesystem partitions' : 'Select filesystem partition…'),
+            items: [
+              for (final p in _fsPartitions)
+                DropdownMenuItem(value: p, child: Text('${p.name} (${p.subtypeName}, ${p.size.bytesString})')),
+            ],
+            onChanged: busy || _fsPartitions.isEmpty
+                ? null
+                : (p) {
+                    if (p != null) _read(p);
+                  },
+          ),
+          FilledButton.tonalIcon(onPressed: busy || _partition == null ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
         ],
         OutlinedButton.icon(onPressed: busy ? null : _openImage, icon: const Icon(Icons.folder_open), label: const Text('Open image file…')),
         DropdownButton<FsType?>(
@@ -247,7 +275,15 @@ class _FilesystemPageState extends State<FilesystemPage> {
       const SizedBox(height: 8),
       if (volume == null)
         Expanded(
-          child: Center(child: Text(session.connected ? 'Reading…' : 'Connect to a device, or open a filesystem image file.')),
+          child: Center(
+            child: busy
+                ? const CircularProgressIndicator()
+                : Text(!session.connected
+                    ? 'Connect to a device, or open a filesystem image file.'
+                    : _partition == null
+                        ? 'Select a filesystem partition to read it, or open an image file.'
+                        : 'Could not read ${_partition!.name} — see the log.'),
+          ),
         )
       else ...[
         Padding(

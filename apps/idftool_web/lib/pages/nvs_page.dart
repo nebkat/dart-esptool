@@ -26,44 +26,69 @@ class _NvsPageState extends State<NvsPage> {
   PartitionDefinition? _partition;
   NvsImage? _image;
   final _edits = <NvsEdit>[];
-  bool _loadedFor = false;
+  bool _listedFor = false;
 
   DeviceSession get session => widget.session;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (session.connected && !_loadedFor && !session.busy) {
-      _loadedFor = true;
-      _load();
+  void initState() {
+    super.initState();
+    session.addListener(_onSessionChanged);
+    _onSessionChanged();
+  }
+
+  @override
+  void dispose() {
+    session.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  /// On connect, list the NVS partitions; nothing is read until one is
+  /// picked, unless the page was opened for a specific partition.
+  void _onSessionChanged() {
+    if (!mounted) return;
+    if (session.connected && !_listedFor && !session.busy) {
+      _listedFor = true;
+      Future<void>.microtask(_listPartitions);
     }
-    if (!session.connected) {
-      _loadedFor = false;
-      _image = null;
-      _partition = null;
-      _edits.clear();
+    if (!session.connected && _listedFor) {
+      _listedFor = false;
+      setState(() {
+        _nvsPartitions = const [];
+        _image = null;
+        _partition = null;
+        _edits.clear();
+      });
     }
   }
 
+  Future<void> _listPartitions() async {
+    final partitions = await session.runDevice('List NVS partitions',
+        (device) async => (await device.partitionTable()).findByType(PartitionType.data, DataSubtype.nvs).toList());
+    if (partitions == null || !mounted) return;
+    setState(() => _nvsPartitions = partitions);
+    if (partitions.isEmpty) session.addLog('No NVS partition in the partition table', error: true);
+    final wanted = partitions.where((p) => p.name == widget.initialPartition).firstOrNull;
+    if (wanted != null) await _read(wanted);
+  }
+
   Future<void> _load() async {
-    await session.runDevice('Read NVS', (device) async {
-      final table = await device.partitionTable();
-      final partitions = table.findByType(PartitionType.data, DataSubtype.nvs).toList();
-      final wanted = _partition?.name ?? widget.initialPartition;
-      final partition = partitions.where((p) => p.name == wanted).firstOrNull ?? partitions.firstOrNull;
-      if (partition == null) throw IdfToolException('No NVS partition in the partition table');
+    final p = _partition;
+    if (p != null) await _read(p);
+  }
+
+  Future<void> _read(PartitionDefinition partition) async {
+    setState(() {
+      _partition = partition;
+      _image = null;
+      _edits.clear();
+    });
+    await session.runDevice('Read ${partition.name}', (device) async {
       final (partition: _, image: image) = await device.readNvs(name: partition.name, onProgress: session.reportProgress);
       for (final e in image.errors) {
         session.addLog('NVS: $e', error: true);
       }
-      if (mounted) {
-        setState(() {
-          _nvsPartitions = partitions;
-          _partition = partition;
-          _image = image;
-          _edits.clear();
-        });
-      }
+      if (mounted) setState(() => _image = image);
     });
   }
 
@@ -140,23 +165,21 @@ class _NvsPageState extends State<NvsPage> {
     final image = _image;
     final busy = session.busy;
     final pending = {for (final e in _edits) e.qualified: e};
-    final theme = Theme.of(context);
     return ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        if (_nvsPartitions.length > 1)
-          DropdownButton<PartitionDefinition>(
-            value: _partition,
-            items: [for (final p in _nvsPartitions) DropdownMenuItem(value: p, child: Text('${p.name} (${p.size.bytesString})'))],
-            onChanged: busy
-                ? null
-                : (p) {
-                    _partition = p;
-                    _load();
-                  },
-          )
-        else if (_partition != null)
-          Text('${_partition!.name} (${_partition!.size.bytesString} at ${_partition!.offset.hex})', style: theme.textTheme.titleMedium),
-        FilledButton.tonalIcon(onPressed: busy ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
+        DropdownButton<PartitionDefinition>(
+          value: _partition,
+          hint: Text(_nvsPartitions.isEmpty ? 'No NVS partitions' : 'Select NVS partition…'),
+          items: [
+            for (final p in _nvsPartitions) DropdownMenuItem(value: p, child: Text('${p.name} (${p.size.bytesString} at ${p.offset.hex})')),
+          ],
+          onChanged: busy || _nvsPartitions.isEmpty
+              ? null
+              : (p) {
+                  if (p != null) _read(p);
+                },
+        ),
+        FilledButton.tonalIcon(onPressed: busy || _partition == null ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
         OutlinedButton.icon(
           onPressed: image == null ? null : () => saveText('nvs.csv', nvsToCsv(image.entries), mimeType: 'text/csv'),
           icon: const Icon(Icons.download),
@@ -178,7 +201,14 @@ class _NvsPageState extends State<NvsPage> {
       ]),
       const SizedBox(height: 12),
       if (image == null)
-        const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: busy
+                ? const CircularProgressIndicator()
+                : Text(_partition == null ? 'Select an NVS partition to read it.' : 'Could not read ${_partition!.name} — see the log.'),
+          ),
+        )
       else ...[
         Row(children: [
           Text('${image.entries.length} entries in ${image.namespaces.length} namespace${image.namespaces.length == 1 ? '' : 's'}, '
