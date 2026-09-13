@@ -590,6 +590,9 @@ class PartitionTable extends UnmodifiableListView<PartitionDefinition> {
     // Pad so that trailing fields may be omitted entirely.
     final fields = '$line,,,,'.split(',').map((f) => f.trim()).toList();
     final name = fields[0];
+    if (name.startsWith('@')) {
+      throw PartitionTableException("Partition name '$name' is reserved: '@' marks bundle role files (@factory.bin, @ota.bin)");
+    }
 
     if (fields[1].isEmpty) throw PartitionTableException("Field 'type' can't be left empty.");
     final type = parseIntField(fields[1], PartitionType.keywords);
@@ -752,6 +755,11 @@ class PartitionTable extends UnmodifiableListView<PartitionDefinition> {
     final names = map((p) => p.name).toList();
     if (names.toSet().length != names.length) {
       throw PartitionTableException('Partition names must be unique');
+    }
+    for (final p in this) {
+      if (p.name.startsWith('@')) {
+        throw PartitionTableException("Partition name '${p.name}' is reserved: '@' marks bundle role files (@factory.bin, @ota.bin)");
+      }
     }
 
     // Stable sort, so identical offsets are reported in table order like Python.

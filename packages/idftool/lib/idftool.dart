@@ -5,6 +5,7 @@
 /// browser; the CLI in `bin/` adds the desktop serial transport.
 library;
 
+export 'src/bundle.dart';
 export 'src/device.dart';
 export 'src/flash/differential.dart';
 export 'src/fs/fs.dart';
