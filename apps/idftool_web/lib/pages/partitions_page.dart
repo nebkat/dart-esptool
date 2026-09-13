@@ -7,6 +7,7 @@ import '../session/flash_plan.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/partition_grid.dart';
+import '../widgets/partition_map.dart';
 
 /// What is on the device: bootloader, partition table and partitions, with
 /// per-row dump and, for NVS and filesystem partitions, a way into their
@@ -204,7 +205,7 @@ class _PartitionsPageState extends State<PartitionsPage> {
                   ]),
                 ),
               )
-      else
+      else ...[
         PartitionGrid(
           rows: fromFile ? plan.rowsOf(table) : plan.deviceRows,
           table: table,
@@ -218,6 +219,13 @@ class _PartitionsPageState extends State<PartitionsPage> {
                   TextButton.icon(onPressed: busy ? null : () => _dump(p), icon: const Icon(Icons.download, size: 18), label: const Text('Dump')),
                 ],
         ),
+        const SizedBox(height: 16),
+        PartitionMap(
+          rows: fromFile ? plan.rowsOf(table) : plan.deviceRows,
+          flashSize: fromFile ? null : session.flashSize,
+          activeSlot: otadata?.slot,
+        ),
+      ],
     ]);
   }
 }
