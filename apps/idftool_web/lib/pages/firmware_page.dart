@@ -5,6 +5,7 @@ import 'package:idftool/idftool.dart';
 import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/dropdown.dart';
 
 /// Flash an app (factory or OTA), choose the boot slot, and move whole-flash
 /// images and bundles.
@@ -113,14 +114,15 @@ class _FirmwarePageState extends State<FirmwarePage> {
                 icon: const Icon(Icons.folder_open),
                 label: Text(_app == null ? 'Choose app .bin…' : '${_app!.name} (${_app!.bytes.length.bytesString})'),
               ),
-              DropdownButton<WriteStrategy>(
+              AppDropdown<WriteStrategy>(
                 value: _strategy,
-                items: const [
-                  DropdownMenuItem(value: WriteStrategy.differential, child: Text('Write changed sectors only')),
-                  DropdownMenuItem(value: WriteStrategy.skipFlashed, child: Text('Skip if already flashed')),
-                  DropdownMenuItem(value: WriteStrategy.always, child: Text('Always write everything')),
+                label: 'Strategy',
+                entries: const [
+                  DropdownMenuEntry(value: WriteStrategy.differential, label: 'Write changed sectors only'),
+                  DropdownMenuEntry(value: WriteStrategy.skipFlashed, label: 'Skip if already flashed'),
+                  DropdownMenuEntry(value: WriteStrategy.always, label: 'Always write everything'),
                 ],
-                onChanged: (s) => setState(() => _strategy = s!),
+                onSelected: (s) => setState(() => _strategy = s ?? _strategy),
               ),
               FilledButton.icon(onPressed: busy || image == null ? null : _ota, icon: const Icon(Icons.system_update_alt), label: const Text('OTA to next slot')),
               FilledButton.tonalIcon(onPressed: busy || image == null ? null : _factory, icon: const Icon(Icons.factory_outlined), label: const Text('Flash to factory')),

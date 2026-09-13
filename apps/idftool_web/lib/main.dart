@@ -6,11 +6,13 @@ import 'package:idftool/idftool.dart' show PartitionTable;
 import 'pages/device_page.dart';
 import 'pages/filesystem_page.dart';
 import 'pages/firmware_page.dart';
+import 'pages/flash_page.dart';
 import 'pages/inspect_page.dart';
 import 'pages/nvs_page.dart';
 import 'pages/oneclick_page.dart';
 import 'pages/partitions_page.dart';
 import 'session/device_session.dart';
+import 'theme.dart';
 import 'widgets/connection_bar.dart';
 import 'widgets/log_panel.dart';
 
@@ -39,34 +41,11 @@ class IdfToolApp extends StatelessWidget {
     return MaterialApp(
       title: 'idftool',
       debugShowCheckedModeBanner: false,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      theme: appTheme(Brightness.light),
+      darkTheme: appTheme(Brightness.dark),
       home: _entry(),
     );
   }
-}
-
-/// One corner radius for everything. Material 3 rounds buttons and chips
-/// far more than text fields; this puts them all on the text field's 4 px
-/// so the toolbars read as one family.
-ThemeData _theme(Brightness brightness) {
-  const radius = 4.0;
-  const shape = RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(radius)));
-  final base = ThemeData(colorSchemeSeed: const Color(0xFF3A6EA5), brightness: brightness);
-  return base.copyWith(
-    filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: shape)),
-    elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(shape: shape)),
-    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(shape: shape)),
-    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(shape: shape)),
-    segmentedButtonTheme: SegmentedButtonThemeData(style: SegmentedButton.styleFrom(shape: shape)),
-    iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(shape: shape)),
-    chipTheme: base.chipTheme.copyWith(shape: shape),
-    cardTheme: base.cardTheme.copyWith(shape: shape),
-    dialogTheme: base.dialogTheme.copyWith(shape: shape),
-    menuTheme: MenuThemeData(style: MenuStyle(shape: WidgetStatePropertyAll(shape))),
-    popupMenuTheme: base.popupMenuTheme.copyWith(shape: shape),
-    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(radius)))),
-  );
 }
 
 /// The tools, as navigation destinations. Pages that need the idftool
@@ -74,6 +53,7 @@ ThemeData _theme(Brightness brightness) {
 enum Tool {
   device('Device', Icons.memory),
   partitions('Partitions', Icons.table_chart_outlined),
+  flash('Flash', Icons.flash_on),
   nvs('NVS', Icons.storage),
   filesystem('Files', Icons.folder_outlined),
   firmware('Firmware', Icons.system_update_alt),
@@ -107,7 +87,7 @@ class _HomeShellState extends State<HomeShell> {
     for (final note in _session.plan.stageTable(table, source: source)) {
       _session.addLog(note, error: true);
     }
-    setState(() => _tool = Tool.partitions);
+    setState(() => _tool = Tool.flash);
   }
 
   void _planBundle(Uint8List zip, String name) {
@@ -119,7 +99,7 @@ class _HomeShellState extends State<HomeShell> {
       _session.addLog(e.message, error: true);
       return;
     }
-    setState(() => _tool = Tool.partitions);
+    setState(() => _tool = Tool.flash);
   }
 
   @override
@@ -149,7 +129,10 @@ class _HomeShellState extends State<HomeShell> {
                 _fsPartition = name;
                 _tool = Tool.filesystem;
               }),
+              onOpenFlash: () => setState(() => _tool = Tool.flash),
+              onPlanTable: _planTable,
             ),
+          Tool.flash => FlashPage(session: _session),
           Tool.nvs => NvsPage(key: ValueKey(_nvsPartition), session: _session, initialPartition: _nvsPartition),
           Tool.filesystem => FilesystemPage(key: ValueKey(_fsPartition), session: _session, initialPartition: _fsPartition),
           Tool.firmware => FirmwarePage(session: _session),

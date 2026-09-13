@@ -7,6 +7,7 @@ import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/type_chip.dart';
+import '../widgets/dropdown.dart';
 
 /// Browse and edit an NVS partition: entries grouped by namespace, pending
 /// edits applied in one write of only the pages that changed.
@@ -25,8 +26,20 @@ class _NvsPageState extends State<NvsPage> {
   List<PartitionDefinition> _nvsPartitions = const [];
   PartitionDefinition? _partition;
   NvsImage? _image;
+
+  /// The file [_image] came from, when it wasn't read from the device.
+  String? _source;
   final _edits = <NvsEdit>[];
   bool _listedFor = false;
+
+  /// Whether [_image] is an opened file rather than a device partition;
+  /// edits then apply in memory and the result is saved, not written.
+  bool get _fromFile => _image != null && _partition == null;
+
+  String get _stem {
+    final s = _source ?? _partition?.name ?? 'nvs';
+    return s.contains('.') ? s.substring(0, s.lastIndexOf('.')) : s;
+  }
 
   DeviceSession get session => widget.session;
 
@@ -55,9 +68,12 @@ class _NvsPageState extends State<NvsPage> {
       _listedFor = false;
       setState(() {
         _nvsPartitions = const [];
-        _image = null;
-        _partition = null;
-        _edits.clear();
+        if (_partition != null) {
+          // an opened file survives; a device partition does not
+          _image = null;
+          _partition = null;
+          _edits.clear();
+        }
       });
     }
   }
@@ -77,9 +93,50 @@ class _NvsPageState extends State<NvsPage> {
     if (p != null) await _read(p);
   }
 
+  /// Open an NVS image, or a CSV (built into an image of whatever size it
+  /// takes), to browse and edit without a device.
+  Future<void> _openFile() async {
+    final file = await pickFile(extensions: ['bin', 'csv']);
+    if (file == null || !mounted) return;
+    final NvsImage image;
+    try {
+      if (looksLikeNvsBinary(file.bytes)) {
+        image = parseNvs(file.bytes);
+      } else {
+        final csv = String.fromCharCodes(file.bytes);
+        Uint8List? built;
+        Object? lastError;
+        for (final size in const [0x6000, 0x10000, 0x40000, 0x100000, 0x400000]) {
+          try {
+            built = generateNvsImage(csv, size);
+            break;
+          } catch (e) {
+            lastError = e;
+          }
+        }
+        if (built == null) throw lastError!;
+        image = parseNvs(built);
+      }
+    } catch (e) {
+      session.addLog('Could not open ${file.name} as NVS: $e', error: true);
+      return;
+    }
+    for (final e in image.errors) {
+      session.addLog('NVS: $e', error: true);
+    }
+    setState(() {
+      _image = image;
+      _partition = null;
+      _source = file.name;
+      _edits.clear();
+    });
+    session.addLog('Opened ${file.name}: ${image.entries.length} entries, ${image.data.length.bytesString}');
+  }
+
   Future<void> _read(PartitionDefinition partition) async {
     setState(() {
       _partition = partition;
+      _source = null;
       _image = null;
       _edits.clear();
     });
@@ -94,6 +151,23 @@ class _NvsPageState extends State<NvsPage> {
 
   Future<void> _applyEdits() async {
     final edits = List.of(_edits);
+    if (_fromFile) {
+      final image = _image!;
+      try {
+        final result = applyNvsEdits(image.data, resolveUntypedNvsEdits(image, edits));
+        for (final c in result.changes) {
+          session.addLog(describeNvsChange(c));
+        }
+        setState(() {
+          _image = parseNvs(result.image);
+          _edits.clear();
+        });
+        session.addLog('Applied ${edits.length} change${edits.length == 1 ? '' : 's'} to ${_source ?? 'the image'}; save it with CSV or Image');
+      } catch (e) {
+        session.addLog('Could not apply changes: $e', error: true);
+      }
+      return;
+    }
     final result = await session.runDevice('Write ${edits.length} NVS change${edits.length == 1 ? '' : 's'}',
         (device) => device.editNvs(edits, partitionName: _partition!.name, onProgress: session.reportProgress));
     if (result != null) {
@@ -161,32 +235,35 @@ class _NvsPageState extends State<NvsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!session.connected) return const Center(child: Text('Connect to a device first.'));
     final image = _image;
     final busy = session.busy;
+    final connected = session.connected;
     final pending = {for (final e in _edits) e.qualified: e};
     return ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        DropdownButton<PartitionDefinition>(
-          value: _partition,
-          hint: Text(_nvsPartitions.isEmpty ? 'No NVS partitions' : 'Select NVS partition…'),
-          items: [
-            for (final p in _nvsPartitions) DropdownMenuItem(value: p, child: Text('${p.name} (${p.size.bytesString} at ${p.offset.hex})')),
-          ],
-          onChanged: busy || _nvsPartitions.isEmpty
-              ? null
-              : (p) {
-                  if (p != null) _read(p);
-                },
-        ),
-        FilledButton.tonalIcon(onPressed: busy || _partition == null ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
+        if (connected)
+          AppDropdown<PartitionDefinition>(
+            value: _partition,
+            label: 'Partition',
+            hint: _nvsPartitions.isEmpty ? 'No NVS partitions' : 'Select…',
+            entries: [
+              for (final p in _nvsPartitions) DropdownMenuEntry(value: p, label: '${p.name} (${p.size.bytesString} at ${p.offset.hex})'),
+            ],
+            enabled: !busy && _nvsPartitions.isNotEmpty,
+            onSelected: (p) {
+              if (p != null) _read(p);
+            },
+          ),
+        if (connected)
+          FilledButton.tonalIcon(onPressed: busy || _partition == null ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
+        OutlinedButton.icon(onPressed: busy ? null : _openFile, icon: const Icon(Icons.folder_open), label: const Text('Open image or CSV…')),
         OutlinedButton.icon(
-          onPressed: image == null ? null : () => saveText('nvs.csv', nvsToCsv(image.entries), mimeType: 'text/csv'),
+          onPressed: image == null ? null : () => saveText('$_stem.csv', nvsToCsv(image.entries), mimeType: 'text/csv'),
           icon: const Icon(Icons.download),
           label: const Text('CSV'),
         ),
         OutlinedButton.icon(
-          onPressed: image == null ? null : () => saveBytes('nvs.bin', image.data),
+          onPressed: image == null ? null : () => saveBytes('$_stem.bin', image.data),
           icon: const Icon(Icons.download),
           label: const Text('Image'),
         ),
@@ -195,9 +272,11 @@ class _NvsPageState extends State<NvsPage> {
           icon: const Icon(Icons.article_outlined),
           label: const Text('Pages'),
         ),
-        const SizedBox(width: 16),
-        OutlinedButton.icon(onPressed: busy || image == null ? null : _writeCsv, icon: const Icon(Icons.upload_file), label: const Text('Replace from CSV…')),
-        OutlinedButton.icon(onPressed: busy || image == null ? null : _writeImage, icon: const Icon(Icons.upload_file), label: const Text('Replace from image…')),
+        if (connected && _partition != null) ...[
+          const SizedBox(width: 16),
+          OutlinedButton.icon(onPressed: busy || image == null ? null : _writeCsv, icon: const Icon(Icons.upload_file), label: const Text('Replace from CSV…')),
+          OutlinedButton.icon(onPressed: busy || image == null ? null : _writeImage, icon: const Icon(Icons.upload_file), label: const Text('Replace from image…')),
+        ],
       ]),
       const SizedBox(height: 12),
       if (image == null)
@@ -206,12 +285,16 @@ class _NvsPageState extends State<NvsPage> {
             padding: const EdgeInsets.all(24),
             child: busy
                 ? const CircularProgressIndicator()
-                : Text(_partition == null ? 'Select an NVS partition to read it.' : 'Could not read ${_partition!.name} — see the log.'),
+                : Text(!connected
+                    ? 'Connect to a device, or open an NVS image or CSV file.'
+                    : _partition == null
+                        ? 'Select an NVS partition to read it, or open an NVS image or CSV file.'
+                        : 'Could not read ${_partition!.name} — see the log.'),
           ),
         )
       else ...[
         Row(children: [
-          Text('${image.entries.length} entries in ${image.namespaces.length} namespace${image.namespaces.length == 1 ? '' : 's'}, '
+          Text('${_source ?? _partition?.name ?? ''}: ${image.entries.length} entries in ${image.namespaces.length} namespace${image.namespaces.length == 1 ? '' : 's'}, '
               'NVS v${image.version == NvsVersion.v1 ? 1 : 2}, ${image.pages.where((p) => !p.isUninit).length}/${image.pages.length} pages used'),
           const Spacer(),
           FilledButton.tonalIcon(onPressed: busy ? null : () => _editEntry(), icon: const Icon(Icons.add), label: const Text('Add entry')),
@@ -219,7 +302,7 @@ class _NvsPageState extends State<NvsPage> {
           FilledButton.icon(
             onPressed: busy || _edits.isEmpty ? null : _applyEdits,
             icon: const Icon(Icons.save),
-            label: Text(_edits.isEmpty ? 'No changes' : 'Write ${_edits.length} change${_edits.length == 1 ? '' : 's'}'),
+            label: Text(_edits.isEmpty ? 'No changes' : '${_fromFile ? 'Apply' : 'Write'} ${_edits.length} change${_edits.length == 1 ? '' : 's'}'),
           ),
           if (_edits.isNotEmpty) TextButton(onPressed: () => setState(_edits.clear), child: const Text('Discard')),
         ]),
@@ -385,10 +468,11 @@ class _EntryDialogState extends State<_EntryDialog> {
               ),
             ),
             const SizedBox(width: 8),
-            DropdownButton<NvsType>(
+            AppDropdown<NvsType>(
               value: _type,
-              items: [for (final t in NvsType.writable) DropdownMenuItem(value: t, child: Text(t.label))],
-              onChanged: (t) => setState(() => _type = t!),
+              label: 'Type',
+              entries: [for (final t in NvsType.writable) DropdownMenuEntry(value: t, label: t.label)],
+              onSelected: (t) => setState(() => _type = t ?? _type),
             ),
           ]),
           const SizedBox(height: 12),

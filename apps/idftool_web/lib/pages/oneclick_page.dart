@@ -1,13 +1,12 @@
 import 'dart:typed_data';
 
-import 'package:esptool/web.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:idftool/idftool.dart';
 
 import '../session/device_session.dart';
 import '../util/files.dart';
-import '../widgets/port_item.dart';
+import '../widgets/port_picker.dart';
 
 /// The one-click flasher: a bundle (from `?bundle=<url>` or a picked file),
 /// an outline of what it will do, Connect, Flash, done. None of the tool's
@@ -236,18 +235,7 @@ class _OneClickPageState extends State<OneClickPage> {
             icon: session.busy ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.usb),
             label: Text(session.busy ? 'Connecting…' : 'Connect device'),
           ),
-          if (session.ports.length > 1)
-            DropdownButton<SerialPort>(
-              value: session.selectedPort,
-              itemHeight: null,
-              items: [
-                for (final p in session.ports)
-                  DropdownMenuItem(value: p, child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: PortItem(session: session, port: p))),
-              ],
-              selectedItemBuilder: (context) => [for (final p in session.ports) Align(alignment: Alignment.centerLeft, child: portSummary(session, p))],
-              onChanged: session.busy ? null : session.selectPort,
-            ),
-          if (session.ports.isNotEmpty) TextButton(onPressed: session.busy ? null : session.requestPort, child: const Text('Choose another port…')),
+          if (session.ports.isNotEmpty) PortPicker(session: session, width: 360, enabled: !session.busy),
         ]),
         if (session.log.any((l) => l.error)) ...[
           const SizedBox(height: 8),

@@ -8,6 +8,7 @@ import '../session/device_session.dart';
 import '../util/files.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/type_chip.dart';
+import '../widgets/dropdown.dart';
 
 /// Browse a filesystem partition (LittleFS, SPIFFS, FAT) or an image file:
 /// tree of files, view/download, extract everything as a ZIP, and replace
@@ -225,30 +226,30 @@ class _FilesystemPageState extends State<FilesystemPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), child: Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (session.connected) ...[
-          DropdownButton<PartitionDefinition>(
+          AppDropdown<PartitionDefinition>(
             value: _partition,
-            hint: Text(_fsPartitions.isEmpty ? 'No filesystem partitions' : 'Select filesystem partition…'),
-            items: [
-              for (final p in _fsPartitions)
-                DropdownMenuItem(value: p, child: Text('${p.name} (${p.subtypeName}, ${p.size.bytesString})')),
+            label: 'Partition',
+            hint: _fsPartitions.isEmpty ? 'No filesystem partitions' : 'Select…',
+            entries: [
+              for (final p in _fsPartitions) DropdownMenuEntry(value: p, label: '${p.name} (${p.subtypeName}, ${p.size.bytesString})'),
             ],
-            onChanged: busy || _fsPartitions.isEmpty
-                ? null
-                : (p) {
-                    if (p != null) _read(p);
-                  },
+            enabled: !busy && _fsPartitions.isNotEmpty,
+            onSelected: (p) {
+              if (p != null) _read(p);
+            },
           ),
           FilledButton.tonalIcon(onPressed: busy || _partition == null ? null : _load, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
         ],
         OutlinedButton.icon(onPressed: busy ? null : _openImage, icon: const Icon(Icons.folder_open), label: const Text('Open image file…')),
-        DropdownButton<FsType?>(
+        AppDropdown<FsType?>(
           value: _typeOverride,
-          hint: const Text('Type: auto'),
-          items: [
-            const DropdownMenuItem(value: null, child: Text('Type: auto')),
-            for (final t in FsType.values) DropdownMenuItem(value: t, child: Text('Type: ${t.label}')),
+          label: 'Type',
+          hint: 'Auto-detect',
+          entries: [
+            const DropdownMenuEntry(value: null, label: 'Auto-detect'),
+            for (final t in FsType.values) DropdownMenuEntry(value: t, label: t.label),
           ],
-          onChanged: (t) => setState(() => _typeOverride = t),
+          onSelected: (t) => setState(() => _typeOverride = t),
         ),
         if (volume != null) ...[
           OutlinedButton.icon(

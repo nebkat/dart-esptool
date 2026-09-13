@@ -44,6 +44,8 @@ class FlashPlan extends ChangeNotifier {
   int? _primaryBootloaderOffset;
 
   PartitionTable? _deviceTable;
+  Map<int, AppDescription> _deviceApps = const {};
+  OtaDataParameters? _otadata;
   PartitionTable? _stagedTable;
   String? _stagedTableSource;
   String? _stagedTableProblem;
@@ -64,6 +66,12 @@ class FlashPlan extends ChangeNotifier {
 
   /// The table last read from the device.
   PartitionTable? get deviceTable => _deviceTable;
+
+  /// App descriptors read from the device, by partition offset.
+  Map<int, AppDescription> get deviceApps => _deviceApps;
+
+  /// The device's OTA selection, if its table has one.
+  OtaDataParameters? get otadata => _otadata;
 
   /// A replacement table waiting to be flashed, and where it came from.
   PartitionTable? get stagedTable => _stagedTable;
@@ -90,9 +98,11 @@ class FlashPlan extends ChangeNotifier {
 
   /// The rows to show and address: the bootloader and partition-table
   /// sectors (virtual unless the table itself lists them) then the table.
-  List<PartitionDefinition> get rows => _rowsOf(table);
+  List<PartitionDefinition> get rows => rowsOf(table);
 
-  List<PartitionDefinition> _rowsOf(PartitionTable? table) {
+  /// [table]'s rows with the virtual bootloader and partition-table entries
+  /// for the current geometry, for showing any table the way [rows] is.
+  List<PartitionDefinition> rowsOf(PartitionTable? table) {
     if (table == null) return const [];
     final r = _resolverFor(table);
     return [
@@ -103,7 +113,7 @@ class FlashPlan extends ChangeNotifier {
   }
 
   /// The device's rows, virtual entries included, for dumping what is there.
-  List<PartitionDefinition> get deviceRows => _rowsOf(_deviceTable);
+  List<PartitionDefinition> get deviceRows => rowsOf(_deviceTable);
 
   PartitionResolver _resolverFor(PartitionTable table) =>
       PartitionResolver.forTable(table, partitionTableOffset: _partitionTableOffset, partitionTableSize: _partitionTableSize, primaryBootloaderOffset: _primaryBootloaderOffset);
@@ -128,6 +138,8 @@ class FlashPlan extends ChangeNotifier {
     _partitionTableSize = partitionTableSize;
     _primaryBootloaderOffset = primaryBootloaderOffset;
     _deviceTable = null;
+    _deviceApps = const {};
+    _otadata = null;
     final notes = _reconcile();
     notifyListeners();
     return notes;
@@ -138,6 +150,8 @@ class FlashPlan extends ChangeNotifier {
   void detach() {
     _connected = false;
     _deviceTable = null;
+    _deviceApps = const {};
+    _otadata = null;
     _reconcile();
     notifyListeners();
   }
@@ -153,8 +167,10 @@ class FlashPlan extends ChangeNotifier {
   /// Record the table read from the device. Ops are re-checked against it
   /// unless a staged table is what they are planned on. Returns notes about
   /// anything dropped.
-  List<String> setDeviceTable(PartitionTable table) {
+  List<String> setDeviceTable(PartitionTable table, {Map<int, AppDescription> apps = const {}, OtaDataParameters? otadata}) {
     _deviceTable = table;
+    _deviceApps = apps;
+    _otadata = otadata;
     final notes = _stagedTable == null ? _reconcile() : const <String>[];
     notifyListeners();
     return notes;

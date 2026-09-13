@@ -10,6 +10,7 @@ import '../session/device_session.dart';
 import '../util/files.dart';
 import '../util/inspect.dart';
 import '../widgets/type_chip.dart';
+import '../widgets/dropdown.dart';
 
 /// Open any idftool file without a device — partition tables, flash images,
 /// app and bootloader images, bundles, NVS images and CSVs, filesystem
@@ -174,10 +175,11 @@ class _InspectPageState extends State<InspectPage> {
               label: const Text('Extract all (zip)')),
         ],
       FileKind.fileZip => [
-          DropdownButton<FsType>(
+          AppDropdown<FsType>(
             value: _fsType,
-            items: [for (final t in FsType.values.where((t) => t != FsType.littlefs)) DropdownMenuItem(value: t, child: Text('Type: ${t.label}'))],
-            onChanged: (t) => setState(() => _fsType = t ?? _fsType),
+            label: 'Type',
+            entries: [for (final t in FsType.values.where((t) => t != FsType.littlefs)) DropdownMenuEntry(value: t, label: t.label)],
+            onSelected: (t) => setState(() => _fsType = t ?? _fsType),
           ),
           _sizeField('Image size'),
           FilledButton.tonalIcon(onPressed: () => _buildFs(i), icon: const Icon(Icons.build_outlined), label: const Text('Build filesystem image')),

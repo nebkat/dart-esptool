@@ -104,8 +104,10 @@ class DeviceSession extends ChangeNotifier {
     return id == null ? describePort(port) : '${describePort(port)} — ${id.label}';
   }
 
-  /// Changes queued for the connected device (see [FlashPlan]).
+  /// Changes queued for the connected device (see [FlashPlan]); also holds
+  /// the device's layout once [readLayout] has run.
   final FlashPlan plan = FlashPlan();
+  bool _layoutAttempted = false;
 
   EspLoader? get loader => _loader;
 
@@ -218,6 +220,7 @@ class DeviceSession extends ChangeNotifier {
       flashSize = await loader.attachFlash();
       final device = IdfDevice(loader);
       _device = device;
+      _layoutAttempted = false;
       for (final note in plan.attach(
         chip: detected,
         partitionTableOffset: device.partitionTableOffset,
@@ -382,6 +385,39 @@ class DeviceSession extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Read the partition table, OTA selection and app descriptors into [plan].
+  Future<void> readLayout() => runDevice('Read partition table', (device) async {
+        final table = await device.partitionTable(refresh: true);
+        OtaDataParameters? otadata;
+        try {
+          otadata = (await device.readOtadata()).otadata;
+        } on IdfToolException {
+          // no OTA layout on this table
+        }
+        // The app descriptor sits right after the image header and the first
+        // segment header, so a small read per app partition names the firmware.
+        final apps = <int, AppDescription>{};
+        for (final p in table.where((p) => p.isApp)) {
+          final head = await device.loader.readFlash(p.offset, ImageHeader.size + 8 + AppDescription.size);
+          final desc = AppDescription.fromBytesOrNull(Uint8List.sublistView(head, ImageHeader.size + 8));
+          if (desc != null) apps[p.offset] = desc;
+        }
+        for (final note in plan.setDeviceTable(table, apps: apps, otadata: otadata)) {
+          addLog(note, error: true);
+        }
+      });
+
+  /// [readLayout] once per connection, the first time a page asks while the
+  /// device is idle. A failed read is not retried automatically.
+  void ensureLayout() {
+    if (!connected || busy || _layoutAttempted) return;
+    _layoutAttempted = true;
+    unawaited(readLayout());
+  }
+
+  /// `<chip>-<mac>`, for naming files dumped from the device.
+  String get deviceStem => '${chip!.name.toLowerCase()}-${macString?.replaceAll(':', '') ?? 'device'}';
 
   /// Progress callback for the running operation (an idftool [ProgressCallback]).
   void reportProgress(String label, int done, int total) {
