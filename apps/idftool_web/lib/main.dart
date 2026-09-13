@@ -6,6 +6,7 @@ import 'package:idftool/idftool.dart' show PartitionTable;
 import 'pages/data_page.dart';
 import 'pages/flash_page.dart';
 import 'pages/inspect_page.dart';
+import 'pages/monitor_page.dart';
 import 'pages/oneclick_page.dart';
 import 'pages/partitions_page.dart';
 import 'session/device_session.dart';
@@ -52,6 +53,7 @@ enum Tool {
   partitions('Partitions', Icons.table_chart_outlined),
   flash('Flash', Icons.flash_on),
   data('Data', Icons.storage),
+  monitor('Monitor', Icons.terminal),
   inspect('Inspect', Icons.search);
 
   const Tool(this.label, this.icon);
@@ -125,6 +127,7 @@ class _HomeShellState extends State<HomeShell> {
             ),
           Tool.flash => FlashPage(session: _session),
           Tool.data => DataPage(key: ValueKey((_dataPartition, _dataFile)), session: _session, initialPartition: _dataPartition, initialFile: _dataFile),
+          Tool.monitor => MonitorPage(session: _session),
           Tool.inspect => InspectPage(
               session: _session,
               onPlanTable: _planTable,
@@ -153,7 +156,23 @@ class _HomeShellState extends State<HomeShell> {
                   ],
                 ),
                 const VerticalDivider(width: 1),
-                Expanded(child: page),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    if (_session.monitoring && _tool != Tool.monitor && _tool != Tool.inspect)
+                      MaterialBanner(
+                        leading: const Icon(Icons.terminal),
+                        content: const Text('The device is being monitored: it is running its app, so reading and flashing are unavailable until it is back in the bootloader.'),
+                        actions: [
+                          TextButton(onPressed: () => setState(() => _tool = Tool.monitor), child: const Text('Open monitor')),
+                          FilledButton.tonal(
+                            onPressed: _session.busy ? null : () => _session.stopMonitor(enterBootloader: true),
+                            child: const Text('Enter bootloader'),
+                          ),
+                        ],
+                      ),
+                    Expanded(child: page),
+                  ]),
+                ),
               ]),
             ),
             const Divider(height: 1),

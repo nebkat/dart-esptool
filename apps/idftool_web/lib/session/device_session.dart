@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 
 import 'package:esptool/esptool.dart';
@@ -8,8 +9,10 @@ import 'package:idftool/idftool.dart';
 import 'package:web/web.dart' as web;
 
 import 'flash_plan.dart';
+import 'monitor_log.dart';
 
 export '../util/format.dart';
+export 'monitor_log.dart';
 
 /// How to get the chip into download mode when connecting.
 enum ResetChoice {
@@ -22,7 +25,9 @@ enum ResetChoice {
   final String label;
 }
 
-enum SessionState { disconnected, connecting, connected, busy }
+/// [connected] and [busy] talk to the bootloader; in [monitoring] the chip
+/// runs its app and the port carries its console instead.
+enum SessionState { disconnected, connecting, connected, busy, monitoring }
 
 /// What probing a port found — python idftool's `probe_port` record.
 class PortIdentity {
@@ -88,6 +93,28 @@ class DeviceSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Baud rate for [startMonitor]: the app's console rate.
+  int monitorBaud = 115200;
+
+  /// The monitor's scrollback and filter. Outlives a monitor run, so the
+  /// output is still there after stopping.
+  final MonitorLog monitorLog = MonitorLog();
+
+  StreamSubscription<List<int>>? _monitorSubscription;
+  int _transportBaud = 115200;
+
+  /// Set while monitoring when the port has gone away — a native-USB chip
+  /// re-enumerating after a reset — and the session is waiting for it.
+  ({int? vendor, int? product, DateTime since})? _awaitingPort;
+  bool _reattaching = false;
+
+  bool get monitorWaiting => _awaitingPort != null;
+
+  void setMonitorBaud(int baud) {
+    monitorBaud = baud;
+    notifyListeners();
+  }
+
   SessionState state = SessionState.disconnected;
   WebSerialTransport? _transport;
   EspLoader? _loader;
@@ -125,15 +152,26 @@ class DeviceSession extends ChangeNotifier {
   bool get connected => state == SessionState.connected || state == SessionState.busy;
   bool get busy => state == SessionState.busy || state == SessionState.connecting || _identifying;
 
+  /// The chip is running its app and the port carries its console (see
+  /// [startMonitor]). There is no loader, so nothing that talks to the
+  /// bootloader is available.
+  bool get monitoring => state == SessionState.monitoring;
+
+  /// Whether the port is open, in either mode.
+  bool get portOpen => connected || monitoring;
+
   void _onPortsChanged(web.Event _) => refreshPorts();
 
   Future<void> refreshPorts() async {
     final s = serial;
     if (s == null) return;
     ports = (await s.getPorts().toDart).toDart;
-    if (selectedPort != null && !ports.contains(selectedPort)) {
-      selectedPort = null;
+    if (_awaitingPort != null) {
+      unawaited(_reattachMonitor());
+    } else if (selectedPort != null && !ports.contains(selectedPort)) {
       if (connected) _lost('Port disconnected');
+      if (monitoring) _monitorDropped();
+      selectedPort = null;
     }
     selectedPort ??= ports.firstOrNull;
     notifyListeners();
@@ -197,14 +235,28 @@ class DeviceSession extends ChangeNotifier {
 
   Future<void> connect() async {
     final port = selectedPort;
-    if (port == null || connected || busy) return;
+    if (port == null || portOpen || busy) return;
     state = SessionState.connecting;
     notifyListeners();
-    final stopwatch = Stopwatch()..start();
     addLog('Connecting to ${describePort(port)} ...');
     try {
       final transport = await WebSerialTransport.open(port);
       _transport = transport;
+      _transportBaud = 115200;
+      await _startLoader(port, transport);
+    } catch (e) {
+      addLog('Connect failed: $e', error: true);
+      await _close();
+      state = SessionState.disconnected;
+    }
+    notifyListeners();
+  }
+
+  /// Reset into the bootloader over the open [transport], sync, and bring up
+  /// the loader, device and stub. Leaves the session connected, or throws.
+  Future<void> _startLoader(SerialPort port, WebSerialTransport transport) async {
+    final stopwatch = Stopwatch()..start();
+    {
       final info = port.getInfo();
       final usbOtg = _isNativeUsb(port) && EspChip.values.any((c) => c.imageChipId == info.usbProductId);
       final loader = EspLoader(transport, usbOtg: usbOtg);
@@ -249,12 +301,7 @@ class DeviceSession extends ChangeNotifier {
           'MAC ${macString ?? '?'}${loader.isStub ? ', stub running' : ' (ROM loader)'} '
           'in ${stopwatch.elapsedMilliseconds} ms');
       state = SessionState.connected;
-    } catch (e) {
-      addLog('Connect failed: $e', error: true);
-      await _close();
-      state = SessionState.disconnected;
     }
-    notifyListeners();
   }
 
   String? get macString => _formatMac(mac);
@@ -277,7 +324,7 @@ class DeviceSession extends ChangeNotifier {
     notifyListeners();
     try {
       for (final port in List.of(ports)) {
-        if (connected && port == selectedPort) continue;
+        if (portOpen && port == selectedPort) continue;
         identities[port] = await _probe(port);
         addLog('${describePort(port)}: ${identities[port]!.label}');
         notifyListeners();
@@ -338,6 +385,213 @@ class DeviceSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --------------------------------------------------------------------------
+  // Monitor
+  // --------------------------------------------------------------------------
+
+  /// Start monitoring the app's console at [monitorBaud]. From the
+  /// bootloader, the chip is reset into its app on the open port; otherwise
+  /// the port is opened and, unless [reset] is false, the chip reset.
+  Future<void> startMonitor({bool reset = true}) async {
+    final port = selectedPort;
+    if (port == null || monitoring || busy) return;
+    final fromLoader = connected;
+    reset |= fromLoader;
+    state = SessionState.connecting;
+    notifyListeners();
+    try {
+      if (fromLoader) {
+        await _loader?.dispose();
+        _loader = null;
+        _device = null;
+        plan.detach();
+        flashSize = null;
+        flashId = null;
+      } else {
+        _transport = await WebSerialTransport.open(port, baudRate: monitorBaud);
+        _transportBaud = monitorBaud;
+      }
+      final transport = _transport!;
+      if (_transportBaud != monitorBaud) {
+        await transport.setBaudRate(monitorBaud);
+        _transportBaud = monitorBaud;
+      }
+      _listenMonitor(transport);
+      monitorLog.note('── Monitoring at $monitorBaud baud${reset ? ', resetting into the app' : ''}');
+      state = SessionState.monitoring;
+      addLog('Monitoring ${describePort(port)} at $monitorBaud baud');
+      if (reset) {
+        await _resetOrDrop(transport);
+      } else {
+        await _releaseLines(transport);
+      }
+    } catch (e) {
+      addLog('Monitor failed: $e', error: true);
+      await _close();
+      state = SessionState.disconnected;
+    }
+    notifyListeners();
+  }
+
+  /// Reboot the chip into its app while monitoring.
+  Future<void> monitorReset() async {
+    final transport = _transport;
+    if (!monitoring || monitorWaiting || transport == null) return;
+    monitorLog.note('── Reset');
+    await _resetOrDrop(transport);
+  }
+
+  /// Send [text] to the app's console.
+  Future<void> monitorSend(String text) async {
+    final transport = _transport;
+    if (!monitoring || monitorWaiting || transport == null) return;
+    try {
+      await transport.write(Uint8List.fromList(utf8.encode(text)));
+    } catch (e) {
+      addLog('Send failed: $e', error: true);
+    }
+  }
+
+  /// Stop monitoring and close the port — or, with [enterBootloader], reset
+  /// into the bootloader on the open port and connect as [connect] would.
+  Future<void> stopMonitor({bool enterBootloader = false}) async {
+    if (!monitoring) return;
+    await _stopListening();
+    monitorLog.flush();
+    monitorLog.note('── Monitor stopped');
+    final port = selectedPort;
+    final transport = _transport;
+    if (!enterBootloader || monitorWaiting || port == null || transport == null) {
+      await _close();
+      state = SessionState.disconnected;
+      addLog('Monitor stopped');
+      notifyListeners();
+      return;
+    }
+    state = SessionState.connecting;
+    notifyListeners();
+    addLog('Entering the bootloader ...');
+    try {
+      if (_transportBaud != 115200) {
+        await transport.setBaudRate(115200);
+        _transportBaud = 115200;
+      }
+      await _startLoader(port, transport);
+    } catch (e) {
+      addLog('Connect failed: $e', error: true);
+      await _close();
+      state = SessionState.disconnected;
+    }
+    notifyListeners();
+  }
+
+  void _listenMonitor(WebSerialTransport transport) {
+    _monitorSubscription = transport.input.listen(monitorLog.add, onError: (Object _) => _monitorDropped());
+  }
+
+  Future<void> _stopListening() async {
+    final subscription = _monitorSubscription;
+    _monitorSubscription = null;
+    await subscription?.cancel();
+  }
+
+  /// Pulse EN with GPIO0 released (RTS high, DTR low, together), as
+  /// `idf.py monitor` resets into the app. A native-USB chip may drop off the
+  /// bus doing so; that is handled as a dropped port, not an error.
+  Future<void> _resetOrDrop(WebSerialTransport transport) async {
+    try {
+      await transport.port.setSignals(SerialOutputSignals(dataTerminalReady: false, requestToSend: true)).toDart;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await transport.port.setSignals(SerialOutputSignals(dataTerminalReady: false, requestToSend: false)).toDart;
+    } catch (e) {
+      if (transport.port.connected) {
+        addLog('Reset failed: $e', error: true);
+      } else {
+        _monitorDropped();
+      }
+    }
+  }
+
+  /// Deassert DTR and RTS together, which opening the port may have
+  /// asserted, so the chip is neither held in reset nor reset.
+  Future<void> _releaseLines(WebSerialTransport transport) async {
+    try {
+      await transport.port.setSignals(SerialOutputSignals(dataTerminalReady: false, requestToSend: false)).toDart;
+    } catch (_) {}
+  }
+
+  /// The port went away while monitoring. Wait a while for the same kind of
+  /// device to come back, and pick up where the monitor left off.
+  void _monitorDropped() {
+    if (!monitoring || _awaitingPort != null) return;
+    final transport = _transport;
+    final info = transport?.port.getInfo();
+    final since = DateTime.now();
+    _awaitingPort = (vendor: info?.usbVendorId, product: info?.usbProductId, since: since);
+    monitorLog.flush();
+    monitorLog.note('── Port lost, waiting for the device to come back');
+    unawaited(_stopListening());
+    _transport = null;
+    if (transport != null) unawaited(_closeQuietly(transport));
+    notifyListeners();
+    unawaited(_reattachMonitor());
+    Timer(const Duration(seconds: 15), () {
+      if (_awaitingPort?.since != since) return;
+      _awaitingPort = null;
+      monitorLog.note('── The port did not come back');
+      addLog('Monitor: the port did not come back', error: true);
+      unawaited(_close());
+      state = SessionState.disconnected;
+      notifyListeners();
+    });
+  }
+
+  Future<void> _reattachMonitor() async {
+    final wanted = _awaitingPort;
+    final s = serial;
+    if (wanted == null || s == null || _reattaching) return;
+    _reattaching = true;
+    try {
+      for (var attempt = 0; attempt < 20 && identical(_awaitingPort, wanted); attempt++) {
+        final granted = (await s.getPorts().toDart).toDart;
+        final matching = [
+          for (final p in granted)
+            if (p.connected && p.getInfo().usbVendorId == wanted.vendor && p.getInfo().usbProductId == wanted.product) p,
+        ];
+        final port = matching.contains(selectedPort) ? selectedPort : (matching.length == 1 ? matching.single : null);
+        if (port != null) {
+          try {
+            final transport = await WebSerialTransport.open(port, baudRate: monitorBaud);
+            if (!identical(_awaitingPort, wanted)) {
+              await _closeQuietly(transport);
+              return;
+            }
+            _transport = transport;
+            _transportBaud = monitorBaud;
+            selectedPort = port;
+            _awaitingPort = null;
+            _listenMonitor(transport);
+            await _releaseLines(transport);
+            monitorLog.note('── Reconnected');
+            notifyListeners();
+            return;
+          } catch (_) {
+            // Not openable yet; try again shortly.
+          }
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    } finally {
+      _reattaching = false;
+    }
+  }
+
+  static Future<void> _closeQuietly(WebSerialTransport transport) async {
+    try {
+      await transport.close().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
   void _lost(String why) {
     addLog(why, error: true);
     unawaited(_close());
@@ -345,6 +599,8 @@ class DeviceSession extends ChangeNotifier {
   }
 
   Future<void> _close() async {
+    await _stopListening();
+    _awaitingPort = null;
     final loader = _loader;
     final transport = _transport;
     _loader = null;
@@ -446,6 +702,7 @@ class DeviceSession extends ChangeNotifier {
   @override
   void dispose() {
     plan.dispose();
+    monitorLog.dispose();
     super.dispose();
   }
 

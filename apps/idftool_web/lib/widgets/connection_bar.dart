@@ -12,7 +12,7 @@ class ConnectionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final locked = session.connected || session.busy;
+    final locked = session.portOpen || session.busy;
     final theme = Theme.of(context);
     return Material(
       color: theme.colorScheme.surfaceContainer,
@@ -44,7 +44,26 @@ class ConnectionBar extends StatelessWidget {
                   if (v != null) session.setReset(v);
                 },
               ),
-              if (!session.connected)
+              if (session.monitoring) ...[
+                Chip(
+                  avatar: const Icon(Icons.terminal, size: 18),
+                  label: Text([
+                    'Monitoring',
+                    if (session.chip != null) session.chip!.name,
+                    '${session.monitorBaud} baud',
+                    if (session.monitorWaiting) 'waiting for the port',
+                  ].join('  ·  ')),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: session.busy ? null : () => session.stopMonitor(enterBootloader: true),
+                  icon: const Icon(Icons.memory),
+                  label: const Text('Enter bootloader'),
+                ),
+                TextButton(
+                  onPressed: session.busy ? null : session.stopMonitor,
+                  child: const Text('Stop monitor'),
+                ),
+              ] else if (!session.connected)
                 FilledButton.icon(
                   onPressed: session.busy || session.selectedPort == null
                       ? null
