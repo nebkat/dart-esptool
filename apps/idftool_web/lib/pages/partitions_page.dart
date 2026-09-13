@@ -15,17 +15,25 @@ import '../widgets/type_chip.dart';
 /// The device's flash layout — bootloader, partition table and partitions —
 /// and the plan of changes to it.
 ///
-/// Viewing: each row dumps to a file, and NVS rows open in the NVS tool.
+/// Without a device, a partition table file (or a bundle from the Inspect
+/// tool) can be opened to plan against; the plan is kept and flashed once a
+/// device connects.
+///
+/// Viewing: each row dumps to a file, and NVS and filesystem rows can be
+/// browsed in their own tools.
 /// Planning: rows take an erase or a file to write (dropped or picked), a
 /// replacement table or a whole bundle can be staged, and the queued
 /// operations sit at the bottom until one doubly-confirmed Flash writes them
 /// — table first, then erases, then writes.
 class PartitionsPage extends StatefulWidget {
-  const PartitionsPage({super.key, required this.session, this.onOpenNvs});
+  const PartitionsPage({super.key, required this.session, this.onOpenNvs, this.onOpenFilesystem});
   final DeviceSession session;
 
-  /// Called with a partition name to open it in the NVS tool.
+  /// Called with a partition name to browse it in the NVS tool.
   final ValueChanged<String>? onOpenNvs;
+
+  /// Called with a partition name to browse it in the filesystem tool.
+  final ValueChanged<String>? onOpenFilesystem;
 
   @override
   State<PartitionsPage> createState() => _PartitionsPageState();
@@ -50,12 +58,16 @@ class _PartitionsPageState extends State<PartitionsPage> {
   @override
   void initState() {
     super.initState();
+    _planning = !plan.isEmpty;
     plan.addListener(_onPlanChanged);
+    session.addListener(_onSessionChanged);
+    _onSessionChanged();
   }
 
   @override
   void dispose() {
     plan.removeListener(_onPlanChanged);
+    session.removeListener(_onSessionChanged);
     super.dispose();
   }
 
@@ -63,20 +75,22 @@ class _PartitionsPageState extends State<PartitionsPage> {
     if (mounted) setState(() {});
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
+  /// Read the table once per connection, as soon as the device is idle —
+  /// whether it connected before this page opened or after.
+  void _onSessionChanged() {
+    if (!mounted) return;
     if (session.connected && !_loadedFor && !session.busy) {
       _loadedFor = true;
-      _refresh();
+      Future<void>.microtask(_refresh);
     }
-    if (!session.connected) {
+    if (!session.connected && (_loadedFor || _otadata != null)) {
       _loadedFor = false;
-      _otadata = null;
-      _apps.clear();
-      _planning = false;
-      _hoverRow = null;
-      _dragging = false;
+      setState(() {
+        _otadata = null;
+        _apps.clear();
+        _hoverRow = null;
+        _dragging = false;
+      });
     }
   }
 
@@ -355,31 +369,62 @@ class _PartitionsPageState extends State<PartitionsPage> {
   // Build
   // --------------------------------------------------------------------------
 
+  /// The chip picker for offline planning (it fixes the bootloader offset).
+  Widget _chipPicker() => DropdownButton<EspChip?>(
+        value: plan.chip,
+        hint: const Text('Chip'),
+        items: [
+          const DropdownMenuItem(value: null, child: Text('Chip: unknown (no bootloader row)')),
+          for (final c in EspChip.values) DropdownMenuItem(value: c, child: Text('Chip: ${c.name}')),
+        ],
+        onChanged: plan.setChip,
+      );
+
+  Widget _offlineStart() => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Connect a device to see its partitions, or open a partition table to plan changes without one.'),
+            const SizedBox(height: 16),
+            Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              FilledButton.tonalIcon(onPressed: _stageTable, icon: const Icon(Icons.table_chart_outlined), label: const Text('Open partition table…')),
+              FilledButton.tonalIcon(onPressed: _loadBundle, icon: const Icon(Icons.unarchive_outlined), label: const Text('Open bundle…')),
+              _chipPicker(),
+            ]),
+          ]),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    if (!session.connected) return const Center(child: Text('Connect to a device first.'));
+    final offline = !session.connected;
     final table = plan.table;
+    if (offline && table == null) return _offlineStart();
     final busy = session.busy;
     final scheme = Theme.of(context).colorScheme;
-    final showPlan = _planning;
+    final showPlan = _planning || offline;
     return ListView(padding: const EdgeInsets.all(16), children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: false, icon: Icon(Icons.visibility_outlined), label: Text('View')),
-            ButtonSegment(value: true, icon: Icon(Icons.edit_outlined), label: Text('Plan changes')),
-          ],
-          selected: {showPlan},
-          onSelectionChanged: (s) => setState(() => _planning = s.single),
-          showSelectedIcon: false,
-        ),
+        if (offline)
+          _chipPicker()
+        else
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, icon: Icon(Icons.visibility_outlined), label: Text('View')),
+              ButtonSegment(value: true, icon: Icon(Icons.edit_outlined), label: Text('Plan changes')),
+            ],
+            selected: {showPlan},
+            onSelectionChanged: (s) => setState(() => _planning = s.single),
+            showSelectedIcon: false,
+          ),
         const SizedBox(width: 8),
-        FilledButton.tonalIcon(onPressed: busy ? null : _refresh, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
-        OutlinedButton.icon(
-          onPressed: plan.deviceTable == null || busy ? null : _dumpBundle,
-          icon: const Icon(Icons.archive_outlined),
-          label: const Text('Dump bundle'),
-        ),
+        FilledButton.tonalIcon(onPressed: busy || offline ? null : _refresh, icon: const Icon(Icons.refresh), label: const Text('Re-read')),
+        if (!showPlan)
+          OutlinedButton.icon(
+            onPressed: plan.deviceTable == null || busy ? null : _dumpBundle,
+            icon: const Icon(Icons.archive_outlined),
+            label: const Text('Dump bundle'),
+          ),
         MenuAnchor(
           builder: (context, controller, _) => OutlinedButton.icon(
             onPressed: table == null ? null : () => controller.isOpen ? controller.close() : controller.open(),
@@ -442,7 +487,18 @@ class _PartitionsPageState extends State<PartitionsPage> {
         const SizedBox(height: 12),
       ],
       if (table == null)
-        const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+        busy
+            ? const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+            : Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Could not read the partition table — see the log.', style: TextStyle(color: scheme.error)),
+                    const SizedBox(height: 8),
+                    FilledButton.tonalIcon(onPressed: _refresh, icon: const Icon(Icons.refresh), label: const Text('Try again')),
+                  ]),
+                ),
+              )
       else
         DropTarget(
           onDragUpdated: _onDragUpdated,
@@ -450,24 +506,29 @@ class _PartitionsPageState extends State<PartitionsPage> {
           onDragDone: _onDragDone,
           child: Card(
             shape: _dragging ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: scheme.primary, width: 2)) : null,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columnSpacing: 20,
-                dataTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
-                headingTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontWeight: FontWeight.bold, fontSize: 13),
-                columns: [
-                  const DataColumn(label: Text('Name')),
-                  const DataColumn(label: Text('Type')),
-                  const DataColumn(label: Text('Subtype')),
-                  const DataColumn(label: Text('Offset')),
-                  const DataColumn(label: Text('Size')),
-                  const DataColumn(label: Text('Flags')),
-                  const DataColumn(label: Text('Contents')),
-                  if (showPlan) const DataColumn(label: Text('Planned')),
-                  const DataColumn(label: Text('')),
-                ],
-                rows: [for (final p in plan.rows) _row(p, table, showPlan: showPlan, busy: busy, scheme: scheme)],
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                  child: DataTable(
+                    columnSpacing: 20,
+                    dataTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
+                    headingTextStyle: const TextStyle(fontFamily: 'RobotoMono', fontWeight: FontWeight.bold, fontSize: 13),
+                    columns: [
+                      const DataColumn(label: Text('Name')),
+                      const DataColumn(label: Text('Type')),
+                      const DataColumn(label: Text('Subtype')),
+                      const DataColumn(label: Text('Offset')),
+                      const DataColumn(label: Text('Size')),
+                      const DataColumn(label: Text('Flags')),
+                      const DataColumn(label: Text('Contents')),
+                      if (showPlan) const DataColumn(label: Text('Planned')),
+                      const DataColumn(label: Text(''), numeric: true),
+                    ],
+                    rows: [for (final p in plan.rows) _row(p, table, showPlan: showPlan, busy: busy || offline, scheme: scheme)],
+                  ),
+                ),
               ),
             ),
           ),
@@ -477,6 +538,7 @@ class _PartitionsPageState extends State<PartitionsPage> {
         _PlanPanel(
             plan: plan,
             busy: busy,
+            offline: offline,
             onFlash: _flash,
             onSaveBundle: _saveBundle,
             onClear: plan.clear,
@@ -514,10 +576,10 @@ class _PartitionsPageState extends State<PartitionsPage> {
         DataCell(_contents(p, scheme)),
         if (showPlan) DataCell(_plannedCell(p, op, hovered: hovered, scheme: scheme)),
         DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-          TextButton.icon(onPressed: busy ? null : () => _dump(p), icon: const Icon(Icons.download, size: 18), label: const Text('Dump')),
-          if (p.isData && p.subtype == DataSubtype.nvs.value && widget.onOpenNvs != null && plan.stagedTable == null)
-            TextButton.icon(onPressed: () => widget.onOpenNvs!(p.name), icon: const Icon(Icons.storage, size: 18), label: const Text('Open')),
-          if (showPlan) ...[
+          if (!showPlan) ...[
+            if (_browser(p) case final browse?) TextButton.icon(onPressed: () => browse(p.name), icon: const Icon(Icons.folder_open, size: 18), label: const Text('Browse')),
+            TextButton.icon(onPressed: busy ? null : () => _dump(p), icon: const Icon(Icons.download, size: 18), label: const Text('Dump')),
+          ] else ...[
             if (p.isPrimaryPartitionTable)
               TextButton.icon(onPressed: _stageTable, icon: const Icon(Icons.table_chart_outlined, size: 18), label: const Text('Replace…'))
             else ...[
@@ -532,6 +594,15 @@ class _PartitionsPageState extends State<PartitionsPage> {
         ])),
       ],
     );
+  }
+
+  /// The tool that can browse [p] on the device, if any. Only meaningful
+  /// against the device's own table.
+  ValueChanged<String>? _browser(PartitionDefinition p) {
+    if (!session.connected || plan.stagedTable != null || !p.isData) return null;
+    if (p.subtype == DataSubtype.nvs.value) return widget.onOpenNvs;
+    if (FsType.forPartition(p) != null) return widget.onOpenFilesystem;
+    return null;
   }
 
   /// What the device holds: the app descriptor for app partitions, or, on a
@@ -575,6 +646,7 @@ class _PlanPanel extends StatelessWidget {
   const _PlanPanel({
     required this.plan,
     required this.busy,
+    required this.offline,
     required this.onFlash,
     required this.onSaveBundle,
     required this.onClear,
@@ -583,6 +655,7 @@ class _PlanPanel extends StatelessWidget {
   });
   final FlashPlan plan;
   final bool busy;
+  final bool offline;
   final VoidCallback onFlash;
   final VoidCallback onSaveBundle;
   final VoidCallback onClear;
@@ -649,7 +722,7 @@ class _PlanPanel extends StatelessWidget {
                 onPressed: writes.isEmpty && plan.stagedTable == null ? null : onSaveBundle, icon: const Icon(Icons.archive_outlined), label: const Text('Save as bundle')),
             const SizedBox(width: 16),
             FilledButton.icon(
-              onPressed: plan.isEmpty || busy ? null : onFlash,
+              onPressed: plan.isEmpty || busy || offline ? null : onFlash,
               style: FilledButton.styleFrom(
                 backgroundColor: scheme.error,
                 foregroundColor: scheme.onError,
@@ -657,7 +730,11 @@ class _PlanPanel extends StatelessWidget {
                 textStyle: theme.textTheme.titleMedium,
               ),
               icon: const Icon(Icons.flash_on),
-              label: Text(plan.isEmpty ? 'Flash' : 'Flash $count operation${count == 1 ? '' : 's'}'),
+              label: Text(offline
+                  ? 'Connect a device to flash'
+                  : plan.isEmpty
+                      ? 'Flash'
+                      : 'Flash $count operation${count == 1 ? '' : 's'}'),
             ),
           ]),
         ]),

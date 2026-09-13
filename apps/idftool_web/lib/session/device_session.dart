@@ -9,6 +9,8 @@ import 'package:web/web.dart' as web;
 
 import 'flash_plan.dart';
 
+export '../util/format.dart';
+
 /// How to get the chip into download mode when connecting.
 enum ResetChoice {
   auto('Auto'),
@@ -202,9 +204,7 @@ class DeviceSession extends ChangeNotifier {
       Object? lastError;
       for (final (strategy, name) in strategies) {
         try {
-          detected = await loader
-              .connect(reset: strategy, attempts: 3)
-              .timeout(const Duration(seconds: 15), onTimeout: () => throw EspConnectException('$name reset timed out'));
+          detected = await loader.connect(reset: strategy, attempts: 3).timeout(const Duration(seconds: 15), onTimeout: () => throw EspConnectException('$name reset timed out'));
           break;
         } on EspConnectException catch (e) {
           lastError = e;
@@ -212,19 +212,20 @@ class DeviceSession extends ChangeNotifier {
         }
       }
       if (detected == null) {
-        throw EspConnectException(
-            'Could not sync with the chip. Hold BOOT and tap RESET, then connect with reset = none.', lastError);
+        throw EspConnectException('Could not sync with the chip. Hold BOOT and tap RESET, then connect with reset = none.', lastError);
       }
       chip = detected;
       flashSize = await loader.attachFlash();
       final device = IdfDevice(loader);
       _device = device;
-      plan.attach(
+      for (final note in plan.attach(
         chip: detected,
         partitionTableOffset: device.partitionTableOffset,
         partitionTableSize: device.partitionTableSize,
         primaryBootloaderOffset: device.primaryBootloaderOffset,
-      );
+      )) {
+        addLog(note, error: true);
+      }
       if (useStub) {
         await loader.runStub();
       }
@@ -248,9 +249,8 @@ class DeviceSession extends ChangeNotifier {
   static String? _formatMac(Uint8List? mac) => mac?.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
 
   List<(EspReset, String)> _strategies(SerialPort port) => switch (reset) {
-        ResetChoice.auto => _isNativeUsb(port)
-            ? [(EspResets.usbJtag(), 'USB-JTAG'), (EspResets.classic(), 'classic')]
-            : [(EspResets.classic(), 'classic'), (EspResets.usbJtag(), 'USB-JTAG')],
+        ResetChoice.auto =>
+          _isNativeUsb(port) ? [(EspResets.usbJtag(), 'USB-JTAG'), (EspResets.classic(), 'classic')] : [(EspResets.classic(), 'classic'), (EspResets.usbJtag(), 'USB-JTAG')],
         ResetChoice.usbJtag => [(EspResets.usbJtag(), 'USB-JTAG')],
         ResetChoice.classic => [(EspResets.classic(), 'classic')],
         ResetChoice.none => [(EspResets.none, 'no')],
@@ -351,8 +351,7 @@ class DeviceSession extends ChangeNotifier {
 
   /// Run [op] against the connected loader as the one active operation,
   /// logging failures. Returns `null` if it failed or nothing is connected.
-  Future<T?> run<T>(String label, Future<T> Function(EspLoader loader) op) =>
-      runDevice(label, (device) => op(device.loader));
+  Future<T?> run<T>(String label, Future<T> Function(EspLoader loader) op) => runDevice(label, (device) => op(device.loader));
 
   /// [run], handing the operation the [IdfDevice].
   Future<T?> runDevice<T>(String label, Future<T> Function(IdfDevice device) op) async {
@@ -408,13 +407,4 @@ class DeviceSession extends ChangeNotifier {
   static String _hex(int v, int width) => '0x${v.toRadixString(16).padLeft(width, '0')}';
   static String _mb(int bytes) => '${bytes ~/ (1024 * 1024)} MB';
   static String _seconds(Duration d) => '${(d.inMilliseconds / 1000).toStringAsFixed(2)} s';
-}
-
-extension SessionFormatting on int {
-  String get hex => '0x${toRadixString(16)}';
-  String get bytesString {
-    if (this >= 1024 * 1024) return '${(this / (1024 * 1024)).toStringAsFixed(this % (1024 * 1024) == 0 ? 0 : 2)} MiB';
-    if (this >= 1024) return '${(this / 1024).toStringAsFixed(this % 1024 == 0 ? 0 : 1)} KiB';
-    return '$this B';
-  }
 }

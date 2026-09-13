@@ -49,6 +49,15 @@ class FlashPlan extends ChangeNotifier {
   String? _stagedTableProblem;
   final _ops = <String, PlannedOp>{};
 
+  bool _connected = false;
+
+  /// The chip being planned for: the connected one, or the one chosen for
+  /// offline planning (it fixes the bootloader offset).
+  EspChip? get chip => _chip;
+
+  /// Whether the geometry came from a connected device.
+  bool get connected => _connected;
+
   /// Where the device's ROM looks for the bootloader, per chip.
   int? get primaryBootloaderOffset => _primaryBootloaderOffset;
   int get partitionTableOffset => _partitionTableOffset;
@@ -101,20 +110,36 @@ class FlashPlan extends ChangeNotifier {
 
   PartitionDefinition? row(String name) => rows.where((p) => p.name == name).firstOrNull;
 
-  /// Called on connect with the device's geometry; discards any old plan.
-  void attach({required EspChip chip, required int partitionTableOffset, required int partitionTableSize, int? primaryBootloaderOffset}) {
+  /// Pick the chip for offline planning. Ignored while a device is connected.
+  void setChip(EspChip? chip) {
+    if (_connected) return;
+    _chip = chip;
+    _primaryBootloaderOffset = chip?.bootloaderFlashOffset;
+    _reconcile();
+    notifyListeners();
+  }
+
+  /// Called on connect with the device's geometry. A plan built offline is
+  /// kept and re-checked against it; returns notes about anything dropped.
+  List<String> attach({required EspChip chip, required int partitionTableOffset, required int partitionTableSize, int? primaryBootloaderOffset}) {
+    _connected = true;
     _chip = chip;
     _partitionTableOffset = partitionTableOffset;
     _partitionTableSize = partitionTableSize;
     _primaryBootloaderOffset = primaryBootloaderOffset;
     _deviceTable = null;
-    clear();
+    final notes = _reconcile();
+    notifyListeners();
+    return notes;
   }
 
+  /// Called on disconnect. A plan on a staged table survives (it can be
+  /// flashed to the next device); one on the device's own table cannot.
   void detach() {
-    _chip = null;
+    _connected = false;
     _deviceTable = null;
-    clear();
+    _reconcile();
+    notifyListeners();
   }
 
   void clear() {
@@ -209,7 +234,8 @@ class FlashPlan extends ChangeNotifier {
         _ops.remove(name);
         continue;
       }
-      if (now.offset == op.partition.offset && now.size == op.partition.size) continue;
+      // Re-stage against the current row: geometry may have changed, and a
+      // write's image warning depends on the chip.
       if (op.isWrite) {
         final problem = stageWrite(now, op.file!);
         if (problem != null) {
@@ -217,7 +243,7 @@ class FlashPlan extends ChangeNotifier {
           _ops.remove(name);
         }
       } else {
-        _ops[name] = PlannedOp.erase(now, warning: op.warning);
+        _ops[name] = PlannedOp.erase(now, warning: now.isPrimaryBootloader ? 'The device will not boot until a bootloader is written' : null);
       }
     }
     return notes;
