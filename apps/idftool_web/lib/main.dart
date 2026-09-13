@@ -39,11 +39,34 @@ class IdfToolApp extends StatelessWidget {
     return MaterialApp(
       title: 'idftool',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF3A6EA5), brightness: Brightness.light),
-      darkTheme: ThemeData(colorSchemeSeed: const Color(0xFF3A6EA5), brightness: Brightness.dark),
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
       home: _entry(),
     );
   }
+}
+
+/// One corner radius for everything. Material 3 rounds buttons and chips
+/// far more than text fields; this puts them all on the text field's 4 px
+/// so the toolbars read as one family.
+ThemeData _theme(Brightness brightness) {
+  const radius = 4.0;
+  const shape = RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(radius)));
+  final base = ThemeData(colorSchemeSeed: const Color(0xFF3A6EA5), brightness: brightness);
+  return base.copyWith(
+    filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: shape)),
+    elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(shape: shape)),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(shape: shape)),
+    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(shape: shape)),
+    segmentedButtonTheme: SegmentedButtonThemeData(style: SegmentedButton.styleFrom(shape: shape)),
+    iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(shape: shape)),
+    chipTheme: base.chipTheme.copyWith(shape: shape),
+    cardTheme: base.cardTheme.copyWith(shape: shape),
+    dialogTheme: base.dialogTheme.copyWith(shape: shape),
+    menuTheme: MenuThemeData(style: MenuStyle(shape: WidgetStatePropertyAll(shape))),
+    popupMenuTheme: base.popupMenuTheme.copyWith(shape: shape),
+    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(radius)))),
+  );
 }
 
 /// The tools, as navigation destinations. Pages that need the idftool
