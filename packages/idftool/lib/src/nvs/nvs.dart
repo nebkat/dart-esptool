@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'common.dart';
 
 export 'common.dart';
+export 'crypto.dart' show NvsKeys, encryptNvs, decryptNvs, looksEncryptedNvs;
 export 'csv.dart';
 export 'edit.dart';
 export 'parser.dart';

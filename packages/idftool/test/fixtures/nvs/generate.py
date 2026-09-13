@@ -176,4 +176,18 @@ if envs:
     capture('v1')
     edit('edit-v1', 'v1', 'v1:blob:blob=' + blob(50, 9), 'v1:new:string=added')
 
+# -- encryption (HMAC-based key protection) --------------------------------------------------
+
+# enc-<name>.bin is <name>.csv encrypted with keys derived from hmac-key.bin (bytes 00..1f);
+# enc-keys.bin is the nvs_keys file the generator writes alongside, holding eky, tky and a CRC.
+if envs:
+    with open('hmac-key.bin', 'wb') as f:
+        f.write(bytes(range(32)))
+    for name, size in [('basic', '0x6000'), ('types', '0x6000'), ('bigblob', '0x8000')]:
+        run(envs[-1], '-m', 'esp_idf_nvs_partition_gen', 'encrypt', f'{name}.csv', f'enc-{name}.bin', size,
+            '--keygen', '--key_protect_hmac', '--kp_hmac_inputkey', 'hmac-key.bin', '--keyfile', 'enc-keys.bin',
+            '--outdir', HERE)
+    os.replace(os.path.join('keys', 'enc-keys.bin'), 'enc-keys.bin')
+    os.rmdir('keys')
+
 print('ok')

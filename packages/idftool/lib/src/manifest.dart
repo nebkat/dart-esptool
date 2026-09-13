@@ -312,12 +312,16 @@ typedef FlashStepCallback = void Function(int index, FlashStep step);
 
 /// Run every step of [bundle] against [device], in order. Throws on the
 /// first failure; [onStep] fires as each step starts.
+///
+/// [nvsKeys] decrypt and re-encrypt the partition for `set-nvs` steps on an
+/// encrypted NVS partition. Keys never come from the bundle itself.
 Future<void> runFlashBundle(
   IdfDevice device,
   FlashBundle bundle, {
   FlashStepCallback? onStep,
   ProgressCallback? onProgress,
   WriteStrategy strategy = WriteStrategy.differential,
+  NvsKeys? nvsKeys,
   void Function(String message)? log,
 }) async {
   final manifest = bundle.manifest;
@@ -359,7 +363,7 @@ Future<void> runFlashBundle(
         await device.clearBoot();
         log?.call('boot slot cleared');
       case SetNvsStep():
-        final r = await device.editNvs(step.edits, partitionName: step.partition, onProgress: onProgress);
+        final r = await device.editNvs(step.edits, partitionName: step.partition, keys: nvsKeys, onProgress: onProgress);
         for (final c in r.result.changes) {
           log?.call(describeNvsChange(c));
         }

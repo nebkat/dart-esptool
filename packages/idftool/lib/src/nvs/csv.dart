@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'common.dart';
+import 'crypto.dart';
 import 'writer.dart';
 
 /// One data row of an NVS CSV.
@@ -119,11 +120,14 @@ List<(int, List<String>)> _csvRecords(List<(int, String)> lines) {
 /// pages it wrote for a read-only size, the result is always padded to [size]
 /// with erased flash — that parses the same and is what gets flashed anyway.
 /// Throws [NoSpaceError] if the contents don't fit.
+///
+/// With [keys] the image is encrypted, as `nvs_partition_gen encrypt` would.
 Uint8List generateNvsImage(
   String csv,
   int size, {
   NvsVersion version = NvsVersion.v2,
   Uint8List? Function(String path)? readFile,
+  NvsKeys? keys,
 }) {
   final rows = parseNvsCsv(csv);
   final writer = NvsWriter.blank(size, version: version)..ensureActivePage();
@@ -163,7 +167,7 @@ Uint8List generateNvsImage(
     final (type, value) = _decodeCsvValue(row.key, row.encoding.toLowerCase(), text, fileBytes, where);
     writer.writeItem(current, row.key, type, value);
   }
-  return writer.data;
+  return keys == null ? writer.data : encryptNvs(writer.data, keys);
 }
 
 final _fillPattern = RegExp(r'^(blob_fill|blob_sz_fill)\((\d+);(0x[0-9a-fA-F]{2})\)$');

@@ -343,6 +343,7 @@ class NvsImage {
     Map<int, String>? namespaces,
     List<String>? errors,
     this.version = NvsVersion.v2,
+    this.looksEncrypted = false,
   })  : pages = pages ?? [],
         entries = entries ?? [],
         namespaces = namespaces ?? {},
@@ -360,6 +361,11 @@ class NvsImage {
 
   /// The version of the first initialised page (v2 for a blank image).
   final NvsVersion version;
+
+  /// Whether the image has written entries but none that pass their CRC —
+  /// an encrypted partition read without its key. Only the page map is
+  /// meaningful then; see `decryptNvs`.
+  final bool looksEncrypted;
 
   int get size => data.length;
 

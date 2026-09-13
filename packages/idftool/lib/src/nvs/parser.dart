@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart';
 
 import 'common.dart';
+import 'crypto.dart' show looksEncryptedNvs;
 
 /// Parse an NVS partition image into its pages, namespaces, and key/value
 /// pairs.
@@ -28,6 +29,16 @@ NvsImage parseNvs(Uint8List image, {bool strict = false}) {
   if (image.length % NvsLayout.pageSize != 0) {
     throw NvsError('NVS image size 0x${image.length.toRadixString(16)} is not a multiple of the '
         '0x${NvsLayout.pageSize.toRadixString(16)}-byte page size');
+  }
+
+  if (looksEncryptedNvs(image)) {
+    // Every entry would fail its CRC. Say why once rather than once per entry, and keep the
+    // page map, which is not encrypted.
+    const message = 'No entry passes its CRC check: this looks like an encrypted NVS partition — decrypt it with its key';
+    if (strict) throw NvsError(message);
+    final pages = [for (var i = 0; i < image.length ~/ NvsLayout.pageSize; i++) _parsePage(image, i, <String>[], false)];
+    final version = pages.firstWhereOrNull((p) => !p.isUninit && p.crcOk)?.version ?? NvsVersion.v2;
+    return NvsImage(data: image, pages: pages, errors: [message], version: version, looksEncrypted: true);
   }
 
   final errors = <String>[];

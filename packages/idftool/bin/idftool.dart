@@ -99,8 +99,19 @@ Uint8List? _readFileForNvs(String path) => File(path).existsSync() ? File(path).
 
 void _reportNvsErrors(NvsImage image) {
   for (final e in image.errors) {
-    stderr.writeln('Warning: $e');
+    stderr.writeln('Warning: $e${image.looksEncrypted ? ' (pass --hmac-key)' : ''}');
   }
+}
+
+void _addHmacKeyOption(ArgParser parser) => parser.addOption('hmac-key',
+    help: 'Encrypted NVS (HMAC key protection scheme): the HMAC key, as 64 hex digits or a file holding its 32 bytes');
+
+/// The NVS encryption keys from `--hmac-key`, if given.
+NvsKeys? _hmacKeyArg(ArgResults args) {
+  final value = args['hmac-key'] as String?;
+  if (value == null) return null;
+  final file = File(value);
+  return NvsKeys.fromHmacKey(NvsKeys.parseHmacKey(file.existsSync() ? file.readAsBytesSync() : value));
 }
 
 /// Shared by the NVS commands: the image comes from `--file` or from the
@@ -108,19 +119,24 @@ void _reportNvsErrors(NvsImage image) {
 mixin _NvsSource on _Command {
   void addSourceOptions() {
     argParser.addOption('file', abbr: 'f', help: 'Use this NVS image file instead of a partition on the device');
+    _addHmacKeyOption(argParser);
   }
 
+  NvsKeys? get nvsKeys => _hmacKeyArg(argResults!);
+
   /// Load the image, running [body] with it and — when it came from the
-  /// device — the device and partition, so edits can be written back.
+  /// device — the device and partition, so edits can be written back. With
+  /// `--hmac-key` the image is decrypted first, so [body] sees plaintext.
   Future<void> withNvs(String? partitionName, Future<void> Function(Uint8List data, IdfDevice? device, PartitionDefinition? partition) body) async {
     final file = argResults!['file'] as String?;
+    final keys = nvsKeys;
     if (file != null) {
       final data = _readFileArg(file, 'NVS image');
       if (!looksLikeNvsBinary(data)) throw IdfToolException("'$file' does not look like an NVS image");
-      return body(data, null, null);
+      return body(keys == null ? data : decryptNvs(data, keys), null, null);
     }
     await withDevice((device, _) async {
-      final (partition: partition, image: image) = await device.readNvs(name: partitionName, onProgress: progress);
+      final (partition: partition, image: image) = await device.readNvs(name: partitionName, keys: keys, onProgress: progress);
       await body(image.data, device, partition);
     });
   }
@@ -135,6 +151,7 @@ class _CreateNvs extends _Command {
     argParser.addOption('size', help: 'Partition size in bytes (e.g. 0x6000)');
     argParser.addOption('partition', help: 'Partition name to take the size from (--partition-table-file)');
     argParser.addOption('version', defaultsTo: '2', allowed: ['1', '2']);
+    _addHmacKeyOption(argParser);
   }
   @override
   Future<void> run() async {
@@ -152,9 +169,9 @@ class _CreateNvs extends _Command {
       throw UsageException('Pass --size or --partition', '');
     }
     final image = generateNvsImage(csv, size,
-        version: argResults!['version'] == '1' ? NvsVersion.v1 : NvsVersion.v2, readFile: _readFileForNvs);
+        version: argResults!['version'] == '1' ? NvsVersion.v1 : NvsVersion.v2, readFile: _readFileForNvs, keys: _hmacKeyArg(argResults!));
     File(out).writeAsBytesSync(image);
-    stderr.writeln('Wrote ${hex(image.length)}-byte NVS image to $out');
+    stderr.writeln('Wrote ${hex(image.length)}-byte ${argResults!['hmac-key'] != null ? 'encrypted ' : ''}NVS image to $out');
   }
 }
 
@@ -163,6 +180,9 @@ class _WriteNvs extends _Command {
   final name = 'write-nvs';
   @override
   final description = 'Generate an NVS image from a CSV (or take a .bin) and flash it: [PARTITION] FILE';
+  _WriteNvs() {
+    _addHmacKeyOption(argParser);
+  }
   @override
   Future<void> run() => withDevice((device, _) async {
         final rest = argResults!.rest;
@@ -171,9 +191,11 @@ class _WriteNvs extends _Command {
         final path = rest.last;
         final partition = await device.nvsPartition(partitionName);
         final bytes = _readFileArg(path, 'input file');
+        final keys = _hmacKeyArg(argResults!);
+        // With --hmac-key a plaintext .bin is encrypted; one that already is goes as it is.
         final image = looksLikeNvsBinary(bytes)
-            ? bytes
-            : generateNvsImage(String.fromCharCodes(bytes), partition.size, readFile: _readFileForNvs);
+            ? (keys == null || looksEncryptedNvs(bytes) ? bytes : encryptNvs(bytes, keys))
+            : generateNvsImage(String.fromCharCodes(bytes), partition.size, readFile: _readFileForNvs, keys: keys);
         reportWrite(partition.name, await device.writeNvs(image, partitionName: partition.name, strategy: strategy, onProgress: progress));
       });
 }
@@ -183,11 +205,15 @@ class _ReadNvs extends _Command {
   final name = 'read-nvs';
   @override
   final description = 'Read an NVS partition from the device and extract it to CSV: [PARTITION] OUTPUT.csv';
+  _ReadNvs() {
+    _addHmacKeyOption(argParser);
+  }
   @override
   Future<void> run() => withDevice((device, _) async {
         final rest = argResults!.rest;
         if (rest.isEmpty) throw UsageException('Missing output file', '');
-        final (partition: _, image: image) = await device.readNvs(name: rest.length > 1 ? rest[0] : null, onProgress: progress);
+        final (partition: _, image: image) =
+            await device.readNvs(name: rest.length > 1 ? rest[0] : null, keys: _hmacKeyArg(argResults!), onProgress: progress);
         _reportNvsErrors(image);
         File(rest.last).writeAsStringSync(nvsToCsv(image.entries));
         stderr.writeln('Wrote ${image.entries.length} entries to ${rest.last}');
@@ -199,9 +225,14 @@ class _ExtractNvs extends _Command {
   final name = 'extract-nvs';
   @override
   final description = 'Extract an NVS image file to CSV: IMAGE OUTPUT.csv';
+  _ExtractNvs() {
+    _addHmacKeyOption(argParser);
+  }
   @override
   Future<void> run() async {
-    final image = parseNvs(_readFileArg(_arg(argResults!, 0, 'image file'), 'NVS image'));
+    final data = _readFileArg(_arg(argResults!, 0, 'image file'), 'NVS image');
+    final keys = _hmacKeyArg(argResults!);
+    final image = parseNvs(keys == null ? data : decryptNvs(data, keys));
     _reportNvsErrors(image);
     File(_arg(argResults!, 1, 'output file')).writeAsStringSync(nvsToCsv(image.entries));
   }
@@ -311,16 +342,19 @@ class _SetNvs extends _Command with _NvsSource {
         stderr.writeln('Dry run — nothing written.');
         return;
       }
+      // Encrypt again on the way out; the dirty pages are the same for the ciphertext.
+      final keys = nvsKeys;
+      final output = keys == null ? result.image : encryptNvs(result.image, keys);
       if (partition != null) {
-        final writes = contiguousNvsWrites(partition.offset, result.image, result.dirtyPages);
+        final writes = contiguousNvsWrites(partition.offset, output, result.dirtyPages);
         stderr.writeln("Writing ${hex(writes.fold(0, (n, w) => n + w.$2.length))} bytes to partition '${partition.name}' in ${writes.length} run(s)");
         for (final (address, bytes) in writes) {
           await device!.loader.writeFlash(address, bytes);
         }
       } else {
         final target = argResults!['output'] as String? ?? argResults!['file'] as String;
-        File(target).writeAsBytesSync(result.image);
-        stderr.writeln("Wrote ${hex(result.image.length)} bytes to '$target'");
+        File(target).writeAsBytesSync(output);
+        stderr.writeln("Wrote ${hex(output.length)} bytes to '$target'");
       }
     });
   }

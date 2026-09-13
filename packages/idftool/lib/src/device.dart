@@ -146,21 +146,35 @@ class IdfDevice {
   }
 
   /// Read and parse the NVS partition.
-  Future<({PartitionDefinition partition, NvsImage image})> readNvs({String? name, ProgressCallback? onProgress}) async {
+  ///
+  /// With [keys] the partition is decrypted first (throwing [NvsError] if
+  /// they don't decrypt it), so the image — [NvsImage.data] included — is
+  /// plaintext.
+  Future<({PartitionDefinition partition, NvsImage image})> readNvs(
+      {String? name, NvsKeys? keys, ProgressCallback? onProgress}) async {
     final partition = await nvsPartition(name);
     final data = await loader.readFlash(partition.offset, partition.size,
         onProgress: (done, total) => onProgress?.call('Reading ${partition.name}', done, total));
-    return (partition: partition, image: parseNvs(data));
+    return (partition: partition, image: parseNvs(keys == null ? data : decryptNvs(data, keys)));
   }
 
   /// Apply [edits] to the NVS partition and write back only the pages that
   /// changed (a page is one flash sector, so partial writes are safe).
   /// Returns the edit result and the number of bytes written.
+  ///
+  /// With [keys] the partition is encrypted: it is decrypted, edited, and
+  /// encrypted again, and [NvsEditResult.image] is what went to flash. The
+  /// dirty pages are the same either way, since a page's ciphertext depends
+  /// only on its plaintext and position.
   Future<({NvsEditResult result, int written})> editNvs(List<NvsEdit> edits,
-      {String? partitionName, bool forceRewrite = false, ProgressCallback? onProgress}) async {
-    final (partition: partition, image: image) = await readNvs(name: partitionName, onProgress: onProgress);
+      {String? partitionName, NvsKeys? keys, bool forceRewrite = false, ProgressCallback? onProgress}) async {
+    final (partition: partition, image: image) = await readNvs(name: partitionName, keys: keys, onProgress: onProgress);
     final resolved = resolveUntypedNvsEdits(image, edits);
-    final result = applyNvsEdits(image.data, resolved, forceRewrite: forceRewrite);
+    var result = applyNvsEdits(image.data, resolved, forceRewrite: forceRewrite);
+    if (keys != null) {
+      result = NvsEditResult(
+          image: encryptNvs(result.image, keys), changes: result.changes, dirtyPages: result.dirtyPages, compacted: result.compacted);
+    }
     var written = 0;
     for (final (address, data) in contiguousNvsWrites(partition.offset, result.image, result.dirtyPages)) {
       await loader.writeFlash(address, data,

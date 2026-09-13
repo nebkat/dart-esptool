@@ -41,6 +41,27 @@ on https://github.com/nebkat/idftool; note the link here once filed.
   are readable, extractable and (FAT/SPIFFS) buildable in the Dart port;
   python idftool has no filesystem commands.
 
+## NVS
+
+- **Encrypted NVS (HMAC key protection).** (nebkat/idftool#9) `create-nvs`, `write-nvs`,
+  `read-nvs`, `extract-nvs`, `print-nvs`, `get-nvs` and `set-nvs` take
+  `--hmac-key` (64 hex digits or a 32-byte file) and decrypt/encrypt the
+  entries around the usual plaintext code. Upstream idftool has no NVS
+  encryption; `nvs_partition_gen` can only generate or decrypt whole images.
+  An image with written entries but no entry passing its CRC is reported
+  once as "looks encrypted" rather than one CRC error per entry.
+- **Erased entries are not purged.** Newer ESP-IDF firmware overwrites the
+  entries of an erased item with zeros (`Page::purgeEntryRange`, raw, not
+  encrypted); both idftools only flip the bitmap. Harmless — the firmware
+  ignores erased entries either way — but it is a byte difference against a
+  firmware-edited image.
+- **`nvs_partition_gen decrypt` tweak.** It numbers entries for the XTS tweak
+  by counting the non-0xFF entries it has decrypted on a page, where the
+  firmware uses the entry's position. They agree as long as no all-0xFF
+  entry sits before a written one, which append-only pages never have, so
+  this is latent rather than a bug in practice. The Dart port goes by
+  position and the bitmap.
+
 ## Behaviour
 
 - **Differential writes by default** for every partition write, with
