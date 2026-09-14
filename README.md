@@ -35,5 +35,8 @@ esp_defs:
 ## License
 
 The ESP Web Toolkit app (`apps/idftool_web`) is [AGPL-3.0-or-later](apps/idftool_web/LICENSE).
-The packages are [BSD-3-Clause](packages/esp_defs/LICENSE), the usual license for Dart
-and Flutter packages, so they can be used in any project. See [LICENSE.md](LICENSE.md).
+`packages/esptool` is a port of Espressif's esptool and carries its
+[GPL-2.0-or-later](packages/esptool/LICENSE). The other packages are
+[BSD-3-Clause](packages/esp_defs/LICENSE), the usual license for Dart and Flutter
+packages; `esp_defs` in particular reads firmware images without any esptool code.
+See [LICENSE.md](LICENSE.md).
