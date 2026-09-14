@@ -2,8 +2,9 @@ import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
-import 'package:esptool/esptool.dart';
 import 'package:json_annotation/json_annotation.dart';
+
+import 'app_description.dart';
 
 part 'image_metadata.g.dart';
 

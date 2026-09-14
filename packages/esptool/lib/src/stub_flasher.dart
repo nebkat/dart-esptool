@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:esp_defs/esp_defs.dart';
 
-import 'chip.dart';
 import 'stub_flasher.g.dart';
 
 /// A prebuilt flasher-stub binary for one chip: the small program esptool

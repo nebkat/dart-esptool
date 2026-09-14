@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
-/// The app's name as a link to its repository: `@nebkat / ESP-IDF Flasher`.
+/// The app's name as a link to its repository: `@nebkat / ESP Web Toolkit`.
 class AppTitle extends StatelessWidget {
   const AppTitle({super.key});
 
   static const owner = 'nebkat';
-  static const name = 'ESP-IDF Flasher';
-  static const repository = 'https://github.com/nebkat/dart-esptool';
+  static const name = 'ESP Web Toolkit';
+  static const repository = 'https://github.com/nebkat/esp-web-toolkit';
 
   @override
   Widget build(BuildContext context) {

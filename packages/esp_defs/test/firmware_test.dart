@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:esptool/esptool.dart';
+import 'package:esp_defs/esp_defs.dart';
 import 'package:test/test.dart';
 
 void main() {

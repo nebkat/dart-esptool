@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
+import 'package:esp_defs/esp_defs.dart';
 
-import 'chip.dart';
 import 'slip.dart';
 import 'stub_flasher.dart';
 import 'transport.dart';

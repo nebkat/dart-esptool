@@ -1,6 +1,6 @@
-name: esptool
-description: Tools for Espressif chips.
-version: 0.3.0
+name: esp_defs
+description: Espressif chip definitions and firmware image formats — chip table, ESP image header and metadata, app descriptor, reset reasons. No I/O.
+version: 0.1.0
 repository: https://github.com/nebkat/esp-web-toolkit
 publish_to: 'none' # DO NOT REMOVE (PRIVATE PACKAGE)
 resolution: workspace
@@ -9,17 +9,13 @@ environment:
   sdk: ^3.6.0
 
 dependencies:
-  archive: ^4.0.0
   collection: ^1.18.0
   crypto: ^3.0.6
-  esp_defs: ^0.1.0
   json_annotation: ^4.9.0
   pub_semver: ^2.2.0
-  web: ^1.1.0
 
 dev_dependencies:
   lints: ^6.0.0
   test: ^1.24.0
   json_serializable: ^6.8.0
   build_runner: ^2.4.13
-  esptool_libserialport: ^0.1.0
