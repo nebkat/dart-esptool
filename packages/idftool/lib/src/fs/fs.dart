@@ -143,6 +143,46 @@ Uint8List createFs(FsType type, List<FsSource> sources, int size) {
   }
 }
 
+/// What [editFsImage] did.
+typedef FsEditResult = ({Uint8List image, int put, int deleted, List<String> missing});
+
+/// Rebuild [image] with [put] added or replaced and [delete] removed: every
+/// file is read out, the changes applied, and a fresh image of [size] bytes
+/// built. An image that is all `0xFF` (an erased partition) or `null` starts
+/// empty. Paths are relative to the root; a leading `/` is ignored. Deletes
+/// of paths that are not there are reported in `missing`, not errors.
+FsEditResult editFsImage(
+  Uint8List? image, {
+  required FsType type,
+  required int size,
+  Map<String, Uint8List> put = const {},
+  List<String> delete = const [],
+}) {
+  String norm(String path) => path.replaceAll(RegExp(r'^/+'), '');
+  final files = <String, Uint8List>{};
+  if (image != null && image.any((b) => b != 0xFF)) {
+    final v = FsVolume.mount(image, type: type);
+    for (final e in v.entries) {
+      if (!e.isDir) files[e.path] = v.read(e.path);
+    }
+  }
+  final missing = <String>[];
+  var deleted = 0;
+  for (final path in delete) {
+    if (files.remove(norm(path)) == null) {
+      missing.add(path);
+    } else {
+      deleted++;
+    }
+  }
+  for (final MapEntry(key: path, value: bytes) in put.entries) {
+    if (norm(path).isEmpty) throw IdfToolException('A file to put needs a path');
+    files[norm(path)] = bytes;
+  }
+  final rebuilt = createFs(type, [for (final e in files.entries) (path: e.key, bytes: e.value, modified: null)], size);
+  return (image: rebuilt, put: put.length, deleted: deleted, missing: missing);
+}
+
 /// The files in a ZIP as sources for [createFs] (directories are implied by
 /// paths; empty directories are dropped, as SPIFFS has none anyway).
 List<FsSource> sourcesFromZip(Uint8List zip) {

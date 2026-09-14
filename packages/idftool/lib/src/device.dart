@@ -228,6 +228,26 @@ class IdfDevice {
     return _write(partition.offset, image, strategy, onProgress, partition.name);
   }
 
+  /// Put and delete files in a filesystem partition: read it, rebuild the
+  /// image with the changes (see [editFsImage]) and write it back. An
+  /// erased partition starts as an empty filesystem of the partition's type.
+  Future<({WriteOutcome outcome, int put, int deleted, List<String> missing})> editFs({
+    String? partitionName,
+    FsType? type,
+    Map<String, Uint8List> put = const {},
+    List<String> delete = const [],
+    WriteStrategy strategy = WriteStrategy.differential,
+    ProgressCallback? onProgress,
+  }) async {
+    final partition = await fsPartition(partitionName);
+    final image = await loader.readFlash(partition.offset, partition.size,
+        onProgress: (done, total) => onProgress?.call('Reading ${partition.name}', done, total));
+    final t = FsType.resolve(explicit: type, partition: partition, image: image);
+    final edited = editFsImage(image, type: t, size: partition.size, put: put, delete: delete);
+    final outcome = await _write(partition.offset, edited.image, strategy, onProgress, partition.name);
+    return (outcome: outcome, put: edited.put, deleted: edited.deleted, missing: edited.missing);
+  }
+
   // --------------------------------------------------------------------------
   // Apps and OTA
   // --------------------------------------------------------------------------

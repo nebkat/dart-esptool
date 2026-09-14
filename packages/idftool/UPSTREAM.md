@@ -21,9 +21,15 @@ on https://github.com/nebkat/idftool; note the link here once filed.
   an `ops` list for what a file cannot express: set/delete NVS keys in an
   existing partition, put/delete a file in a filesystem partition, erase a
   partition, set/clear the boot slot. Ops run after the file operations. The
-  current `steps` form (one-click bundles) keeps loading; a bundle with no
-  extras has no manifest. Whole-flash images are deliberately not a bundle
-  concept.
+  older `steps` form (a recipe naming its files, nothing derived from
+  filenames) keeps loading; a bundle with no extras has no manifest.
+  Whole-flash images are deliberately not a bundle concept. The Dart port
+  (`FlashBundle.fromZip`, the one-click page) does all of this; single files
+  are `edit-fs` (`partition`, `put` map of path → bundle file, `delete`
+  list), which reads the partition, rebuilds the image and writes it back
+  (SPIFFS and FAT; LittleFS images cannot be built yet). When the manifest
+  names no chip, the chip the app or bootloader image was built for is
+  checked instead.
 - **Plain bundles addressed by name need a matching table.** Tools should
   say whether a bundle carries its own table or relies on the device's.
 

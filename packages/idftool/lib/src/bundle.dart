@@ -43,8 +43,10 @@ class BundleContents {
     Map<String, Uint8List>? partitions,
     this.manifest,
     List<String>? ignored,
+    Map<String, Uint8List>? files,
   })  : partitions = partitions ?? {},
-        ignored = ignored ?? [];
+        ignored = ignored ?? [],
+        files = files ?? {};
 
   /// The table to write first, if the bundle carries one.
   final PartitionTable? table;
@@ -61,6 +63,10 @@ class BundleContents {
 
   /// Entries that mean nothing to a bundle (a README, say).
   final List<String> ignored;
+
+  /// Every file in the ZIP by its full name, ignored ones included, for
+  /// manifest steps that name files directly.
+  final Map<String, Uint8List> files;
 
   bool get isEmpty => table == null && bootloader == null && factoryApp == null && otaApp == null && partitions.isEmpty;
 
@@ -88,13 +94,15 @@ BundleContents readBundle(
   final partitions = <String, Uint8List>{};
   FlashManifest? manifest;
   final ignored = <String>[];
+  final files = <String, Uint8List>{};
   for (final entry in archive.files.where((f) => f.isFile)) {
+    final bytes = entry.readBytes()!;
+    files[entry.name] = bytes;
     final name = entry.name.split('/').last;
     if (name != entry.name) {
       ignored.add(entry.name); // nothing in subdirectories
       continue;
     }
-    final bytes = entry.readBytes()!;
     final dot = name.lastIndexOf('.');
     final stem = dot < 0 ? name : name.substring(0, dot);
     final ext = dot < 0 ? '' : name.substring(dot + 1).toLowerCase();
@@ -135,6 +143,7 @@ BundleContents readBundle(
     partitions: partitions,
     manifest: manifest,
     ignored: ignored,
+    files: files,
   );
 }
 
@@ -164,7 +173,9 @@ List<String> bundleConflicts({
 }
 
 /// Encode a bundle by the same convention. [manifest] is written only when
-/// given; a bundle with no extras needs none.
+/// given; a bundle with no extras needs none. [files] are further entries
+/// the manifest's ops refer to (files to put in a filesystem, say); put them
+/// in a subdirectory so the convention ignores them.
 Uint8List encodeBundle({
   PartitionTable? table,
   Uint8List? bootloader,
@@ -172,6 +183,7 @@ Uint8List encodeBundle({
   Uint8List? otaApp,
   Map<String, Uint8List> partitions = const {},
   FlashManifest? manifest,
+  Map<String, Uint8List> files = const {},
 }) {
   final archive = Archive();
   if (table != null) archive.add(ArchiveFile.string('partition_table.csv', table.toCsv()));
@@ -180,6 +192,9 @@ Uint8List encodeBundle({
   if (otaApp != null) archive.add(ArchiveFile.bytes('${bundleRolePrefix}ota.bin', otaApp));
   for (final MapEntry(key: name, value: bytes) in partitions.entries) {
     archive.add(ArchiveFile.bytes('$name.bin', bytes));
+  }
+  for (final MapEntry(key: name, value: bytes) in files.entries) {
+    archive.add(ArchiveFile.bytes(name, bytes));
   }
   if (manifest != null) archive.add(ArchiveFile.string(FlashManifest.fileName, const JsonEncoder.withIndent('  ').convert(manifest.toJson())));
   return ZipEncoder().encodeBytes(archive);

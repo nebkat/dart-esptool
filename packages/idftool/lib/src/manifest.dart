@@ -1,55 +1,69 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:esptool/esptool.dart';
 
+import 'bundle.dart';
 import 'device.dart';
 import 'flash/differential.dart';
 import 'nvs/nvs.dart';
 import 'partition_table.dart';
 import 'partition_table_files.dart';
 
-/// A one-click flashing recipe: an idftool bundle ZIP carrying a
-/// `manifest.json` that names the device and lists the operations to run,
-/// in order, against files inside the same ZIP.
+/// The optional `manifest.json` of a bundle: a name, description and target
+/// chip, plus what the filename convention (see `bundle.dart`) cannot say.
+///
+/// Two forms. The current one is extras: an `ops` list run after the
+/// file operations the bundle's names imply.
 ///
 /// ```json
 /// {
 ///   "name": "MS5 v0.17.0",
-///   "description": "Field update: OTA app, reset channel",
+///   "description": "Field update: new app, reset the channel",
 ///   "chip": "esp32s3",
-///   "steps": [
-///     {"op": "ota", "file": "app.bin"},
+///   "ops": [
 ///     {"op": "set-nvs", "partition": "nvs_cfg", "set": {"cfg:channel": "string:stable"}},
 ///     {"op": "clear-boot"}
 ///   ]
 /// }
 /// ```
 ///
+/// The older one is a recipe: a `steps` list that is the whole sequence,
+/// naming its files explicitly, with nothing derived from filenames. It
+/// keeps loading. A manifest cannot carry both.
+///
 /// Ops map onto [IdfDevice]: `write-bundle` (every `<partition>.bin` in the
 /// ZIP plus `partition_table.csv` if present), `factory`/`ota` (`file`),
-/// `write-table` (`file`), `write` (`partition`, `file`), `erase`
-/// (`partition`), `set-nvs` (`partition`, `set` map of `ns:key` →
-/// `type:value`, `delete` list of `ns:key`), `write-fs` (`partition`,
-/// `file`), `set-boot` (`partition`), `clear-boot`. The same ZIP is what the
-/// python single-use executables consume.
+/// `write-table` (`file`), `write-bootloader` (`file`), `write`
+/// (`partition`, `file`), `erase` (`partition`), `set-nvs` (`partition`,
+/// `set` map of `ns:key` → `type:value`, `delete` list of `ns:key`),
+/// `write-fs` (`partition`, `file`), `edit-fs` (`partition`, `put` map of
+/// path in the filesystem → file in the bundle, `delete` list of paths),
+/// `set-boot` (`partition`), `clear-boot`. The same ZIP is what the python single-use executables
+/// consume.
 class FlashManifest {
-  const FlashManifest({required this.name, this.description, this.chip, required this.steps});
+  const FlashManifest({this.name, this.description, this.chip, this.steps = const [], this.ops = const []});
 
-  final String name;
+  final String? name;
   final String? description;
 
-  /// The chip the recipe targets (e.g. `esp32s3`); checked against the
+  /// The chip the bundle targets (e.g. `esp32s3`); checked against the
   /// connected device before anything is written. `null` skips the check.
   final EspChip? chip;
+
+  /// The recipe form: the whole sequence. Empty for an extras manifest.
   final List<FlashStep> steps;
+
+  /// The extras form: run after the file operations. Empty for a recipe.
+  final List<FlashStep> ops;
+
+  /// Whether this is the recipe form, which replaces the filename convention.
+  bool get isRecipe => steps.isNotEmpty;
 
   static const fileName = 'manifest.json';
 
   factory FlashManifest.fromJson(Map<String, dynamic> json) {
     final name = json['name'];
-    if (name is! String || name.isEmpty) throw IdfToolException('manifest.json: "name" is required');
+    if (name != null && (name is! String || name.isEmpty)) throw IdfToolException('manifest.json: "name" must be a non-empty string');
     final chipName = json['chip'];
     EspChip? chip;
     if (chipName != null) {
@@ -57,26 +71,35 @@ class FlashManifest {
       chip = EspChip.values.where((c) => c.name.toLowerCase().replaceAll('-', '') == chipName.toLowerCase().replaceAll('-', '')).firstOrNull;
       if (chip == null) throw IdfToolException("manifest.json: unknown chip '$chipName'");
     }
-    final rawSteps = json['steps'];
-    if (rawSteps is! List || rawSteps.isEmpty) throw IdfToolException('manifest.json: "steps" must be a non-empty list');
+    final steps = _steps(json, 'steps', 'step');
+    final ops = _steps(json, 'ops', 'op');
+    if (steps.isNotEmpty && ops.isNotEmpty) throw IdfToolException('manifest.json: "steps" (a recipe) and "ops" (extras) cannot both be present');
+    return FlashManifest(name: name as String?, description: json['description'] as String?, chip: chip, steps: steps, ops: ops);
+  }
+
+  static List<FlashStep> _steps(Map<String, dynamic> json, String key, String noun) {
+    final raw = json[key];
+    if (raw == null) return const [];
+    if (raw is! List || raw.isEmpty) throw IdfToolException('manifest.json: "$key" must be a non-empty list');
     final steps = <FlashStep>[];
-    for (var i = 0; i < rawSteps.length; i++) {
-      final raw = rawSteps[i];
-      if (raw is! Map<String, dynamic>) throw IdfToolException('manifest.json: step ${i + 1} must be an object');
+    for (var i = 0; i < raw.length; i++) {
+      final item = raw[i];
+      if (item is! Map<String, dynamic>) throw IdfToolException('manifest.json: $noun ${i + 1} must be an object');
       try {
-        steps.add(FlashStep.fromJson(raw));
+        steps.add(FlashStep.fromJson(item));
       } on IdfToolException catch (e) {
-        throw IdfToolException('manifest.json: step ${i + 1}: ${e.message}');
+        throw IdfToolException('manifest.json: $noun ${i + 1}: ${e.message}');
       }
     }
-    return FlashManifest(name: name, description: json['description'] as String?, chip: chip, steps: steps);
+    return steps;
   }
 
   Map<String, dynamic> toJson() => {
-        'name': name,
+        if (name != null) 'name': name,
         if (description != null) 'description': description,
         if (chip != null) 'chip': chip!.name.toLowerCase().replaceAll('-', ''),
-        'steps': [for (final s in steps) s.toJson()],
+        if (steps.isNotEmpty) 'steps': [for (final s in steps) s.toJson()],
+        if (ops.isNotEmpty) 'ops': [for (final s in ops) s.toJson()],
       };
 }
 
@@ -104,9 +127,15 @@ sealed class FlashStep {
       'factory' => FactoryStep(file()),
       'ota' => OtaStep(file()),
       'write-table' => WriteTableStep(file(), force: j['force'] == true),
+      'write-bootloader' => WriteBootloaderStep(file()),
       'write' => WritePartitionStep(partition(), file()),
       'erase' => EraseStep(partition()),
       'write-fs' => WriteFsStep(partition(), file()),
+      'edit-fs' => EditFsStep(
+          partition(),
+          put: {for (final e in ((j['put'] as Map?) ?? const {}).entries) '${e.key}': '${e.value}'},
+          delete: [for (final d in (j['delete'] as List?) ?? const []) '$d'],
+        ),
       'set-boot' => SetBootStep(partition()),
       'clear-boot' => const ClearBootStep(),
       'set-nvs' => SetNvsStep(
@@ -141,7 +170,7 @@ class FactoryStep extends FlashStep {
   @override
   String get op => 'factory';
   @override
-  String describe() => 'Flash $file to the factory partition and boot it';
+  String describe() => 'Flash $file to the factory partition (or ota_0) and boot it';
   @override
   List<String> get files => [file];
   @override
@@ -173,6 +202,19 @@ class WriteTableStep extends FlashStep {
   List<String> get files => [file];
   @override
   Map<String, dynamic> toJson() => {'op': op, 'file': file, if (force) 'force': true};
+}
+
+class WriteBootloaderStep extends FlashStep {
+  const WriteBootloaderStep(this.file);
+  final String file;
+  @override
+  String get op => 'write-bootloader';
+  @override
+  String describe() => "Write $file at the chip's bootloader offset";
+  @override
+  List<String> get files => [file];
+  @override
+  Map<String, dynamic> toJson() => {'op': op, 'file': file};
 }
 
 class WritePartitionStep extends FlashStep {
@@ -212,6 +254,35 @@ class WriteFsStep extends FlashStep {
   List<String> get files => [file];
   @override
   Map<String, dynamic> toJson() => {'op': op, 'partition': partition, 'file': file};
+}
+
+/// Put and delete single files in a filesystem partition: the partition is
+/// read, the changes applied and a fresh image written back (SPIFFS and FAT;
+/// LittleFS images cannot be built yet).
+class EditFsStep extends FlashStep {
+  EditFsStep(this.partition, {this.put = const {}, this.delete = const []}) {
+    if (put.isEmpty && delete.isEmpty) throw IdfToolException('edit-fs needs "put" and/or "delete"');
+  }
+  final String partition;
+
+  /// Path in the filesystem → file in the bundle.
+  final Map<String, String> put;
+  final List<String> delete;
+  @override
+  String get op => 'edit-fs';
+  @override
+  String describe() {
+    final what = [
+      if (put.isNotEmpty) 'put ${put.keys.join(', ')}',
+      if (delete.isNotEmpty) 'delete ${delete.join(', ')}',
+    ].join('; ');
+    return 'Update files in $partition: $what';
+  }
+
+  @override
+  List<String> get files => put.values.toList();
+  @override
+  Map<String, dynamic> toJson() => {'op': op, 'partition': partition, if (put.isNotEmpty) 'put': put, if (delete.isNotEmpty) 'delete': delete};
 }
 
 class SetBootStep extends FlashStep {
@@ -264,43 +335,88 @@ class SetNvsStep extends FlashStep {
       {'op': op, if (partition != null) 'partition': partition, if (set.isNotEmpty) 'set': set, if (delete.isNotEmpty) 'delete': delete};
 }
 
-/// A bundle ZIP with its manifest parsed and every referenced file checked
-/// to be present.
+/// A bundle ZIP resolved into the steps that flash it: the operations its
+/// filenames imply (table, bootloader, `@factory`/`@ota`, named
+/// partitions) followed by the manifest's `ops`, or the manifest's `steps`
+/// alone for a recipe. Every referenced file is checked to be present.
 class FlashBundle {
-  const FlashBundle({required this.manifest, required this.zip, required this.files});
+  const FlashBundle({
+    required this.name,
+    this.description,
+    this.chip,
+    required this.steps,
+    required this.contents,
+    required this.zip,
+    required this.files,
+  });
 
-  final FlashManifest manifest;
+  /// The manifest's name, or the bundle's own filename.
+  final String name;
+  final String? description;
+
+  /// The manifest's chip, or the chip the bundle's app or bootloader image
+  /// was built for. `null` when neither says.
+  final EspChip? chip;
+  final List<FlashStep> steps;
+  final BundleContents contents;
 
   /// The ZIP itself, for `write-bundle`.
   final Uint8List zip;
+
+  /// Every entry, by its full name in the ZIP.
   final Map<String, Uint8List> files;
 
-  static FlashBundle fromZip(Uint8List zip) {
-    final Archive archive;
-    try {
-      archive = ZipDecoder().decodeBytes(zip, verify: true);
-    } catch (e) {
-      throw IdfToolException('Not a valid bundle ZIP: $e');
+  FlashManifest? get manifest => contents.manifest;
+
+  /// [source] names the bundle when the manifest does not. The table
+  /// offsets only shape the outline; `write-table` re-reads the table
+  /// against the connected device's geometry.
+  static FlashBundle fromZip(
+    Uint8List zip, {
+    String source = 'bundle',
+    int partitionTableOffset = PartitionTable.defaultOffset,
+    int? primaryBootloaderOffset,
+  }) {
+    final contents = readBundle(zip, partitionTableOffset: partitionTableOffset, primaryBootloaderOffset: primaryBootloaderOffset);
+    final manifest = contents.manifest;
+    final steps = manifest != null && manifest.isRecipe
+        ? manifest.steps
+        : <FlashStep>[
+            if (contents.tableFile case final f?) WriteTableStep(f),
+            if (contents.bootloader != null) const WriteBootloaderStep('bootloader.bin'),
+            if (contents.factoryApp != null) const FactoryStep('${bundleRolePrefix}factory.bin'),
+            if (contents.otaApp != null) const OtaStep('${bundleRolePrefix}ota.bin'),
+            for (final name in contents.partitions.keys) WritePartitionStep(name, '$name.bin'),
+            ...?manifest?.ops,
+          ];
+    if (steps.isEmpty) {
+      throw IdfToolException('Nothing to flash: no partition_table, bootloader.bin, ${bundleRolePrefix}factory.bin, '
+          '${bundleRolePrefix}ota.bin or <name>.bin, and no ${FlashManifest.fileName} steps');
     }
-    final files = {for (final f in archive.files.where((f) => f.isFile)) f.name: f.readBytes()!};
-    final manifestBytes = files[FlashManifest.fileName] ?? (throw IdfToolException('Bundle has no ${FlashManifest.fileName}'));
-    final Object? json;
-    try {
-      json = jsonDecode(utf8.decode(manifestBytes));
-    } catch (e) {
-      throw IdfToolException('${FlashManifest.fileName} is not valid JSON: $e');
-    }
-    if (json is! Map<String, dynamic>) throw IdfToolException('${FlashManifest.fileName} must be a JSON object');
-    final manifest = FlashManifest.fromJson(json);
-    for (final step in manifest.steps) {
+    final files = contents.files;
+    for (final step in steps) {
       for (final name in step.files) {
         if (!files.containsKey(name)) throw IdfToolException("${step.op}: file '$name' is not in the bundle");
       }
     }
-    if (manifest.steps.any((s) => s is WriteBundleStep) && !files.keys.any((k) => k.endsWith('.bin') && !k.contains('/'))) {
+    if (steps.any((s) => s is WriteBundleStep) && !files.keys.any((k) => k.endsWith('.bin') && !k.contains('/'))) {
       throw IdfToolException('write-bundle: the bundle has no <partition>.bin files');
     }
-    return FlashBundle(manifest: manifest, zip: zip, files: files);
+    final stem = source.toLowerCase().endsWith('.zip') ? source.substring(0, source.length - 4) : source;
+    return FlashBundle(
+      name: manifest?.name ?? stem,
+      description: manifest?.description,
+      chip: manifest?.chip ?? _imageChip(contents.factoryApp) ?? _imageChip(contents.otaApp) ?? _imageChip(contents.bootloader),
+      steps: steps,
+      contents: contents,
+      zip: zip,
+      files: files,
+    );
+  }
+
+  static EspChip? _imageChip(Uint8List? image) {
+    final id = image == null ? null : ImageMetadata.fromBytesOrNull(image)?.header.chipId?.value;
+    return id == null ? null : EspChip.values.where((c) => c.imageChipId == id).firstOrNull;
   }
 
   Uint8List file(String name) => files[name] ?? (throw IdfToolException("File '$name' is not in the bundle"));
@@ -324,12 +440,11 @@ Future<void> runFlashBundle(
   NvsKeys? nvsKeys,
   void Function(String message)? log,
 }) async {
-  final manifest = bundle.manifest;
-  if (manifest.chip != null && device.chip != manifest.chip) {
-    throw IdfToolException('This bundle is for ${manifest.chip!.name}, but the connected device is a ${device.chip.name}');
+  if (bundle.chip != null && device.chip != bundle.chip) {
+    throw IdfToolException('This bundle is for ${bundle.chip!.name}, but the connected device is a ${device.chip.name}');
   }
-  for (var i = 0; i < manifest.steps.length; i++) {
-    final step = manifest.steps[i];
+  for (var i = 0; i < bundle.steps.length; i++) {
+    final step = bundle.steps[i];
     onStep?.call(i, step);
     String outcome(WriteOutcome o) => o.skipped ? 'already in flash' : 'wrote ${o.written} bytes in ${o.runs} region${o.runs == 1 ? '' : 's'}';
     switch (step) {
@@ -349,6 +464,10 @@ Future<void> runFlashBundle(
                 source: file, partitionTableOffset: device.partitionTableOffset, primaryBootloaderOffset: device.primaryBootloaderOffset);
         await device.writePartitionTable(table, force: force);
         log?.call('partition table written');
+      case WriteBootloaderStep(:final file):
+        final entry = (await device.resolver()).bootloaderEntry ??
+            (throw IdfToolException('The bootloader offset of ${device.chip.name} is not known'));
+        log?.call('bootloader: ${outcome(await device.writePartition(entry.name, bundle.file(file), strategy: strategy, onProgress: onProgress))}');
       case WritePartitionStep(:final partition, :final file):
         log?.call('$partition: ${outcome(await device.writePartition(partition, bundle.file(file), strategy: strategy, onProgress: onProgress))}');
       case EraseStep(:final partition):
@@ -356,6 +475,18 @@ Future<void> runFlashBundle(
         log?.call('$partition erased');
       case WriteFsStep(:final partition, :final file):
         log?.call('$partition: ${outcome(await device.writeFs(bundle.file(file), partitionName: partition, strategy: strategy, onProgress: onProgress))}');
+      case EditFsStep(:final partition, :final put, :final delete):
+        final r = await device.editFs(
+          partitionName: partition,
+          put: {for (final e in put.entries) e.key: bundle.file(e.value)},
+          delete: delete,
+          strategy: strategy,
+          onProgress: onProgress,
+        );
+        log?.call('$partition: ${r.put} file(s) put, ${r.deleted} deleted; ${outcome(r.outcome)}');
+        for (final m in r.missing) {
+          log?.call('$partition: $m was not there to delete');
+        }
       case SetBootStep(:final partition):
         await device.setBoot(partition);
         log?.call('boot slot set to $partition');
