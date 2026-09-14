@@ -5,16 +5,27 @@ import 'package:http/http.dart' as http;
 import 'package:idftool/idftool.dart';
 
 import '../session/device_session.dart';
+import '../session/flash_plan.dart';
 import '../util/files.dart';
+import '../widgets/op_tile.dart';
 import '../widgets/port_picker.dart';
 
-/// The one-click flasher: a bundle (from `?bundle=<url>` or a picked file),
-/// an outline of what it will do, Connect, Flash, done. None of the tool's
-/// machinery is shown; the log stays behind a disclosure.
+/// The one-click flasher at `/oneclick`: a bundle (from `?bundle=<url>` or a picked file),
+/// an outline of what it will do, Connect, Flash, done. Any bundle works —
+/// one by the filename convention, with or without a manifest of extras,
+/// or an older recipe manifest. The bundle's name and description are the
+/// page's only heading. None of the tool's machinery is shown; the log
+/// stays behind a disclosure.
 class OneClickPage extends StatefulWidget {
-  const OneClickPage({super.key, required this.session, this.bundleUrl});
+  const OneClickPage({super.key, required this.session, this.bundleUrl, this.bundle, this.onBack});
   final DeviceSession session;
   final Uri? bundleUrl;
+
+  /// A bundle already in hand (the Flash page previewing its plan).
+  final FlashBundle? bundle;
+
+  /// Shown as a way back when this page was pushed over the full tool.
+  final VoidCallback? onBack;
 
   @override
   State<OneClickPage> createState() => _OneClickPageState();
@@ -36,7 +47,10 @@ class _OneClickPageState extends State<OneClickPage> {
   void initState() {
     super.initState();
     final url = widget.bundleUrl;
-    if (url != null) {
+    if (widget.bundle case final bundle?) {
+      _bundle = bundle;
+      _phase = _Phase.ready;
+    } else if (url != null) {
       _fetch(url);
     } else {
       _phase = _Phase.loadFailed;
@@ -71,7 +85,7 @@ class _OneClickPageState extends State<OneClickPage> {
 
   void _use(Uint8List bytes, String name) {
     try {
-      final bundle = FlashBundle.fromZip(bytes);
+      final bundle = FlashBundle.fromZip(bytes, source: name);
       setState(() {
         _bundle = bundle;
         _phase = _Phase.ready;
@@ -96,7 +110,7 @@ class _OneClickPageState extends State<OneClickPage> {
       _problem = null;
     });
     Object? failure;
-    await session.runDevice('Flash ${bundle.manifest.name}', (device) async {
+    await session.runDevice('Flash ${bundle.name}', (device) async {
       try {
         await runFlashBundle(
           device,
@@ -134,10 +148,16 @@ class _OneClickPageState extends State<OneClickPage> {
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
+          constraints: const BoxConstraints(maxWidth: 760),
           child: ListView(padding: const EdgeInsets.all(32), shrinkWrap: true, children: [
-            Text('FarmTRX device flasher', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 24),
+            if (widget.onBack case final onBack?)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TextButton.icon(onPressed: onBack, icon: const Icon(Icons.arrow_back, size: 18), label: const Text('Back to the plan')),
+                ),
+              ),
             switch (_phase) {
               _Phase.loading => const Row(children: [
                   SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -165,35 +185,36 @@ class _OneClickPageState extends State<OneClickPage> {
   }
 
   Widget _bundleCard(FlashBundle bundle, ThemeData theme) {
-    final m = bundle.manifest;
     final flashing = _phase == _Phase.flashing;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(m.name, style: theme.textTheme.titleLarge),
-          if (m.description != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(m.description!)),
-          if (m.chip != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('For ${m.chip!.name}', style: theme.textTheme.bodySmall)),
+          Text(bundle.name, style: theme.textTheme.titleLarge),
+          if (bundle.description != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(bundle.description!)),
+          if (bundle.chip != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('For ${bundle.chip!.name}', style: theme.textTheme.bodySmall)),
           const SizedBox(height: 16),
           Text('This update will:', style: theme.textTheme.labelLarge),
-          const SizedBox(height: 6),
-          for (var i = 0; i < m.steps.length; i++)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                SizedBox(
-                  width: 28,
-                  child: _completed.contains(i)
-                      ? const Icon(Icons.check_circle, size: 18, color: Colors.green)
-                      : i == _currentStep && flashing
-                          ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                          : _phase == _Phase.failed && i == _currentStep
-                              ? Icon(Icons.error, size: 18, color: theme.colorScheme.error)
-                              : Text('${i + 1}.', style: theme.textTheme.bodyMedium),
+          for (var i = 0; i < bundle.steps.length; i++)
+            if (_row(bundle, bundle.steps[i]) case final row)
+              OpTile(
+                icon: row.icon,
+                name: row.name,
+                detail: row.detail,
+                summary: row.summary,
+                leading: SizedBox(
+                  width: 24,
+                  child: Center(
+                    child: _completed.contains(i)
+                        ? const Icon(Icons.check_circle, size: 18, color: Colors.green)
+                        : i == _currentStep && flashing
+                            ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : _phase == _Phase.failed && i == _currentStep
+                                ? Icon(Icons.error, size: 18, color: theme.colorScheme.error)
+                                : Text('${i + 1}.', style: theme.textTheme.bodyMedium),
+                  ),
                 ),
-                Expanded(child: Text(m.steps[i].describe())),
-              ]),
-            ),
+              ),
           const SizedBox(height: 20),
           switch (_phase) {
             _Phase.done => Row(children: [
@@ -214,6 +235,60 @@ class _OneClickPageState extends State<OneClickPage> {
         ]),
       ),
     );
+  }
+
+  /// A step as the Flash page shows a planned operation: where it lands
+  /// (named against the bundle's own table when it carries one) and what
+  /// is written there.
+  ({IconData icon, String name, String detail, String summary}) _row(FlashBundle bundle, FlashStep step) {
+    final table = bundle.contents.table;
+    String size(String file) => bundle.files[file]?.length.bytesString ?? '?';
+    PartitionDefinition? find(String name) => table?.findByName(name);
+    String offset(String name) => find(name)?.offset.hex ?? 'by name';
+    return switch (step) {
+      WriteTableStep(:final file) => (icon: Icons.table_chart, name: 'partition_table', detail: PartitionTable.defaultOffset.hex, summary: 'Write $file (first)'),
+      WriteBootloaderStep(:final file) => (
+          icon: Icons.upload_file,
+          name: 'bootloader',
+          detail: bundle.chip?.bootloaderFlashOffset.hex ?? 'chip offset',
+          summary: 'Write $file (${size(file)})',
+        ),
+      FactoryStep(:final file) => (
+          icon: Icons.upload_file,
+          name: FlashRole.factory.fileStem,
+          detail: table == null ? FlashRole.factory.label : factoryTarget(table)?.name ?? FlashRole.factory.label,
+          summary: 'Write $file (${size(file)}) to ${FlashRole.factory.description}',
+        ),
+      OtaStep(:final file) => (
+          icon: Icons.upload_file,
+          name: FlashRole.ota.fileStem,
+          detail: FlashRole.ota.label,
+          summary: 'Write $file (${size(file)}) to ${FlashRole.ota.description}',
+        ),
+      WritePartitionStep(:final partition, :final file) => (icon: Icons.upload_file, name: partition, detail: offset(partition), summary: 'Write $file (${size(file)})'),
+      WriteFsStep(:final partition, :final file) => (icon: Icons.folder_outlined, name: partition, detail: offset(partition), summary: 'Write filesystem image $file (${size(file)})'),
+      EraseStep(:final partition) => (
+          icon: Icons.delete_outline,
+          name: partition,
+          detail: offset(partition),
+          summary: switch (find(partition)) { final p? => 'Erase ${p.size.bytesString}', null => 'Erase' },
+        ),
+      SetNvsStep(:final partition, :final set, :final delete) => (
+          icon: Icons.edit_note,
+          name: partition ?? 'nvs',
+          detail: partition == null ? 'first nvs' : offset(partition),
+          summary: [for (final e in set.entries) 'Set ${e.key} = ${e.value}', for (final d in delete) 'Delete $d'].join(', '),
+        ),
+      EditFsStep(:final partition, :final put, :final delete) => (
+          icon: Icons.folder_outlined,
+          name: partition,
+          detail: offset(partition),
+          summary: [for (final e in put.entries) 'Put ${e.key} (${size(e.value)})', for (final d in delete) 'Delete $d'].join(', '),
+        ),
+      SetBootStep(:final partition) => (icon: Icons.restart_alt, name: partition, detail: offset(partition), summary: 'Boot from it next'),
+      ClearBootStep() => (icon: Icons.restart_alt, name: 'otadata', detail: offset('otadata'), summary: 'Clear the OTA selection so the factory app boots'),
+      WriteBundleStep() => (icon: Icons.unarchive_outlined, name: 'bundle', detail: '', summary: step.describe()),
+    };
   }
 
   Widget _connectAndFlash(ThemeData theme) {
@@ -244,7 +319,7 @@ class _OneClickPageState extends State<OneClickPage> {
         ],
       ]);
     }
-    final chipMismatch = _bundle!.manifest.chip != null && session.chip != _bundle!.manifest.chip;
+    final chipMismatch = _bundle!.chip != null && session.chip != _bundle!.chip;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         const Icon(Icons.check_circle, size: 18, color: Colors.green),
@@ -254,7 +329,7 @@ class _OneClickPageState extends State<OneClickPage> {
       if (chipMismatch)
         Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text('This update is for ${_bundle!.manifest.chip!.name}, but the connected device is a ${session.chip?.name}.',
+          child: Text('This update is for ${_bundle!.chip!.name}, but the connected device is a ${session.chip?.name}.',
               style: TextStyle(color: theme.colorScheme.error)),
         ),
       const SizedBox(height: 12),

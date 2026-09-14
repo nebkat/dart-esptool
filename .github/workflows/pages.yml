@@ -1,8 +1,8 @@
 # Publishes apps/idftool_web to GitHub Pages on every push to main.
 #
 # The app is static: Web Serial needs HTTPS, which Pages provides, and the
-# one-click flasher fetches bundles from wherever `#/oneclick?bundle=<url>`
-# points (that host needs CORS), so no firmware lives here.
+# one-click flasher at `/oneclick?bundle=<url>` fetches bundles from wherever
+# that points (that host needs CORS), so no firmware lives here.
 name: Pages
 
 on:

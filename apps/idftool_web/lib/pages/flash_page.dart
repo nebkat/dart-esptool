@@ -9,6 +9,9 @@ import '../util/files.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/dropdown.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/nvs_editor.dart';
+import '../widgets/op_tile.dart';
+import 'oneclick_page.dart';
 import '../widgets/partition_grid.dart';
 
 /// Plan changes to the flash and write them in one go, in the bundle's
@@ -205,10 +208,48 @@ class _FlashPageState extends State<FlashPage> {
     setState(() => _started = true);
   }
 
+  /// Show the plan as the one-click flasher would present a bundle of it.
+  Future<void> _preview() async {
+    final FlashBundle bundle;
+    try {
+      bundle = FlashBundle.fromZip(
+        plan.toBundle(),
+        source: plan.bundleName ?? 'Untitled bundle',
+        partitionTableOffset: plan.partitionTableOffset,
+        primaryBootloaderOffset: plan.primaryBootloaderOffset,
+      );
+    } on IdfToolException catch (e) {
+      return session.addLog('Cannot preview the plan as a bundle: ${e.message}', error: true);
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => ListenableBuilder(
+          listenable: session,
+          builder: (context, _) => OneClickPage(session: session, bundle: bundle, onBack: () => Navigator.pop(context)),
+        ),
+      ),
+    );
+  }
+
+  /// Ask for the bundle's name and description, then save it. Erases go
+  /// into the manifest; the chip planned for is recorded too.
   Future<void> _saveBundle() async {
-    final erases = plan.ops.where((op) => !op.isWrite).length;
-    if (erases > 0) session.addLog('Bundle saved without $erases erase${erases == 1 ? '' : 's'}; bundles only carry files');
-    await saveBytes('${session.connected ? session.deviceStem : 'plan'}.zip', plan.toBundle(), mimeType: 'application/zip');
+    final details = await showDialog<({String name, String description})>(
+      context: context,
+      builder: (context) => _BundleDetailsDialog(
+        name: plan.bundleName ?? '',
+        description: plan.bundleDescription ?? '',
+        chip: plan.chip,
+        erases: [for (final op in plan.erases) op.partition.name],
+        edits: plan.nvsPlans.length + plan.fsPlans.length,
+      ),
+    );
+    if (details == null || !mounted) return;
+    plan.setBundleInfo(name: details.name, description: details.description);
+    final slug = details.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+    final stem = slug.isNotEmpty ? slug : (session.connected ? session.deviceStem : 'plan');
+    await saveBytes('$stem.zip', plan.toBundle(), mimeType: 'application/zip');
   }
 
   // --------------------------------------------------------------------------
@@ -291,6 +332,8 @@ class _FlashPageState extends State<FlashPage> {
             '${plan.appWarning == null ? '' : '   ⚠ ${plan.appWarning}'}',
       for (final op in erases) _opLine(op),
       for (final op in writes) _opLine(op),
+      for (final n in plan.nvsPlans) '${n.partition.padRight(16)} ${'values'.padLeft(10)}  ${n.summary}',
+      for (final f in plan.fsPlans) '${f.partition.padRight(16)} ${'files'.padLeft(10)}  ${f.summary}',
     ];
     final count = plan.length;
     final noun = 'operation${count == 1 ? '' : 's'}';
@@ -347,6 +390,26 @@ class _FlashPageState extends State<FlashPage> {
             session.addLog('$name: ${_describe(outcome)}');
         }
         plan.unstage(name);
+      }
+      for (final n in plan.nvsPlans) {
+        final r = await device.editNvs(n.edits, partitionName: n.partition, keys: session.nvsKeys, onProgress: session.reportProgress);
+        for (final c in r.result.changes) {
+          session.addLog('${n.partition}: ${describeNvsChange(c)}');
+        }
+        plan.unstageNvsAll(n.partition);
+      }
+      for (final f in plan.fsPlans) {
+        final r = await device.editFs(
+          partitionName: f.partition,
+          put: {for (final e in f.put.entries) e.key: e.value.bytes},
+          delete: f.delete,
+          onProgress: session.reportProgress,
+        );
+        session.addLog('${f.partition}: ${r.put} file(s) put, ${r.deleted} deleted; ${_describe(r.outcome)}');
+        for (final m in r.missing) {
+          session.addLog('${f.partition}: $m was not there to delete');
+        }
+        plan.unstageFsAll(f.partition);
       }
     });
     await session.readLayout();
@@ -430,6 +493,7 @@ class _FlashPageState extends State<FlashPage> {
           offline: offline,
           onFlash: _flash,
           onSaveBundle: _saveBundle,
+          onPreview: _preview,
           onClear: plan.clear,
           onRemove: plan.unstage,
           onRemoveApp: plan.unstageApp,
@@ -657,10 +721,14 @@ class _FlashPageState extends State<FlashPage> {
         extraColumn: 'Planned',
         extra: (p) => plan.ownedByApp(p)
             ? Text('Handled by the ${plan.appRole.label} app', style: TextStyle(color: scheme.outline, fontStyle: FontStyle.italic))
-            : _plannedCell(p.name, plan.opFor(p.name)?.summary, plan.opFor(p.name)?.warning, onRemove: () => plan.unstage(p.name)),
+            : _plannedCells(p),
         actions: (p) => plan.ownedByApp(p)
             ? const []
             : [
+                if (p.isData && p.subtype == DataSubtype.nvs.value)
+                  TextButton.icon(onPressed: () => _editNvs(p), icon: const Icon(Icons.edit_note, size: 18), label: const Text('Values…')),
+                if (FsType.forPartition(p) != null)
+                  TextButton.icon(onPressed: () => _editFs(p), icon: const Icon(Icons.folder_outlined, size: 18), label: const Text('Files…')),
                 TextButton.icon(onPressed: () => _pick(p.name), icon: const Icon(Icons.upload_file, size: 18), label: const Text('Write…')),
                 TextButton.icon(
                     onPressed: () => _stageErase(p),
@@ -736,6 +804,41 @@ class _FlashPageState extends State<FlashPage> {
     return Text(appContents(plan.deviceApps, p));
   }
 
+  /// The write or erase planned for [p], plus chips for its value and file
+  /// edits, which run after it.
+  Widget _plannedCells(PartitionDefinition p) {
+    final op = plan.opFor(p.name);
+    final nvs = plan.nvsPlanFor(p.name);
+    final fs = plan.fsPlanFor(p.name);
+    if (nvs == null && fs == null) return _plannedCell(p.name, op?.summary, op?.warning, onRemove: () => plan.unstage(p.name));
+    return Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      if (op != null || _hoverRow == p.name || _dragging) _plannedCell(p.name, op?.summary, op?.warning, onRemove: () => plan.unstage(p.name)),
+      if (nvs != null)
+        InputChip(
+          avatar: const Icon(Icons.edit_note, size: 18),
+          label: Text('${nvs.length} value${nvs.length == 1 ? '' : 's'}'),
+          tooltip: nvs.summary,
+          onPressed: () => _editNvs(p),
+          onDeleted: () => plan.unstageNvsAll(p.name),
+          deleteButtonTooltipMessage: 'Remove from plan',
+        ),
+      if (fs != null)
+        InputChip(
+          avatar: const Icon(Icons.folder_outlined, size: 18),
+          label: Text('${fs.length} file${fs.length == 1 ? '' : 's'}'),
+          tooltip: fs.summary,
+          onPressed: () => _editFs(p),
+          onDeleted: () => plan.unstageFsAll(p.name),
+          deleteButtonTooltipMessage: 'Remove from plan',
+        ),
+    ]);
+  }
+
+  Future<void> _editNvs(PartitionDefinition p) => showDialog<void>(context: context, builder: (context) => _NvsPlanDialog(plan: plan, partition: p.name));
+
+  Future<void> _editFs(PartitionDefinition p) =>
+      showDialog<void>(context: context, builder: (context) => _FsPlanDialog(plan: plan, partition: p.name, type: FsType.forPartition(p)));
+
   Widget _plannedCell(String name, String? planned, String? warning, {required VoidCallback onRemove}) {
     final scheme = Theme.of(context).colorScheme;
     if (_hoverRow == name) return Text('Drop to write', style: TextStyle(color: scheme.primary, fontStyle: FontStyle.italic));
@@ -777,6 +880,7 @@ class _PlanPanel extends StatelessWidget {
     required this.offline,
     required this.onFlash,
     required this.onSaveBundle,
+    required this.onPreview,
     required this.onClear,
     required this.onRemove,
     required this.onRemoveApp,
@@ -788,6 +892,7 @@ class _PlanPanel extends StatelessWidget {
   final bool offline;
   final VoidCallback onFlash;
   final VoidCallback onSaveBundle;
+  final VoidCallback onPreview;
   final VoidCallback onClear;
   final ValueChanged<String> onRemove;
   final VoidCallback onRemoveApp;
@@ -803,7 +908,7 @@ class _PlanPanel extends StatelessWidget {
     final erases = ops.where((op) => !op.isWrite).toList();
     final writes = ops.where((op) => op.isWrite).toList();
     final count = plan.length;
-    final bundleable = writes.isNotEmpty || plan.manual.isNotEmpty || bootloader != null || plan.app != null || plan.stagedTable != null;
+    final bundleable = !plan.isEmpty;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -816,7 +921,7 @@ class _PlanPanel extends StatelessWidget {
             Text('Nothing planned yet.', style: TextStyle(color: scheme.outline))
           else ...[
             if (plan.stagedTable != null)
-              _OpTile(
+              OpTile(
                 icon: plan.stagedTableProblem == null ? Icons.table_chart : Icons.error_outline,
                 name: 'partition_table',
                 detail: plan.partitionTableOffset.hex,
@@ -825,7 +930,7 @@ class _PlanPanel extends StatelessWidget {
                 onRemove: onDiscardTable,
               ),
             if (bootloader != null)
-              _OpTile(
+              OpTile(
                   icon: Icons.upload_file,
                   name: 'bootloader',
                   detail: bootloader.partition.offset.hex,
@@ -833,15 +938,15 @@ class _PlanPanel extends StatelessWidget {
                   warning: bootloader.warning,
                   onRemove: () => onRemove(bootloader.partition.name)),
             if (plan.app case final app?)
-              _OpTile(
-                  icon: Icons.system_update_alt,
+              OpTile(
+                  icon: Icons.upload_file,
                   name: plan.appRole.fileStem,
                   detail: plan.appTarget ?? plan.appRole.label,
                   summary: 'Write ${app.name} (${app.bytes.length.bytesString}) to ${plan.appRole.description}',
                   warning: plan.appWarning,
                   onRemove: onRemoveApp),
             for (final op in erases)
-              _OpTile(
+              OpTile(
                   icon: Icons.delete_outline,
                   name: op.partition.name,
                   detail: op.partition.offset.hex,
@@ -849,7 +954,7 @@ class _PlanPanel extends StatelessWidget {
                   warning: op.warning,
                   onRemove: () => onRemove(op.partition.name)),
             for (final op in writes)
-              _OpTile(
+              OpTile(
                   icon: Icons.upload_file,
                   name: op.partition.name,
                   detail: op.partition.offset.hex,
@@ -857,7 +962,21 @@ class _PlanPanel extends StatelessWidget {
                   warning: op.warning,
                   onRemove: () => onRemove(op.partition.name)),
             for (final (i, m) in plan.manual.indexed)
-              _OpTile(icon: Icons.upload_file, name: m.name, detail: 'by name', summary: m.summary, warning: m.warning, onRemove: () => onRemoveManual(i)),
+              OpTile(icon: Icons.upload_file, name: m.name, detail: 'by name', summary: m.summary, warning: m.warning, onRemove: () => onRemoveManual(i)),
+            for (final n in plan.nvsPlans)
+              OpTile(
+                  icon: Icons.edit_note,
+                  name: n.partition,
+                  detail: plan.row(n.partition)?.offset.hex ?? 'by name',
+                  summary: n.summary,
+                  onRemove: () => plan.unstageNvsAll(n.partition)),
+            for (final f in plan.fsPlans)
+              OpTile(
+                  icon: Icons.folder_outlined,
+                  name: f.partition,
+                  detail: plan.row(f.partition)?.offset.hex ?? 'by name',
+                  summary: f.summary,
+                  onRemove: () => plan.unstageFsAll(f.partition)),
           ],
           const SizedBox(height: 12),
           Row(children: [
@@ -871,6 +990,12 @@ class _PlanPanel extends StatelessWidget {
               ),
             ),
             TextButton.icon(onPressed: plan.isEmpty || busy ? null : onClear, icon: const Icon(Icons.clear_all), label: const Text('Clear plan')),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+                onPressed: bundleable ? onPreview : null,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Preview'),
+              ),
             const SizedBox(width: 8),
             OutlinedButton.icon(onPressed: bundleable ? onSaveBundle : null, icon: const Icon(Icons.archive_outlined), label: const Text('Save as bundle')),
             const SizedBox(width: 16),
@@ -896,29 +1021,221 @@ class _PlanPanel extends StatelessWidget {
   }
 }
 
-class _OpTile extends StatelessWidget {
-  const _OpTile({required this.icon, required this.name, required this.detail, required this.summary, this.warning, required this.onRemove});
-  final IconData icon;
-  final String name;
-  final String detail;
-  final String summary;
-  final String? warning;
-  final VoidCallback onRemove;
+/// The values queued for one NVS partition: add a set, add a delete, remove.
+class _NvsPlanDialog extends StatelessWidget {
+  const _NvsPlanDialog({required this.plan, required this.partition});
+  final FlashPlan plan;
+  final String partition;
+
+  Future<void> _add(BuildContext context) async {
+    final edit = await showDialog<NvsEdit>(context: context, builder: (context) => const NvsEntryDialog());
+    if (edit != null) plan.stageNvsSet(partition, edit.qualified, NvsPlan.spec(edit));
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final key = await prompt(context, title: 'Delete a value', label: 'namespace:key', hint: 'cfg:channel', action: 'Queue delete');
+    if (key == null) return;
+    try {
+      plan.stageNvsDelete(partition, parseNvsDeleteSpec(key.trim()).qualified);
+    } catch (e) {
+      if (context.mounted) await confirm(context, title: 'Not a key', message: '$e', action: 'OK');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(warning == null ? icon : Icons.warning_amber, color: warning == null ? null : scheme.error),
-      title: Row(children: [
-        SizedBox(width: 160, child: Text(name, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13))),
-        SizedBox(width: 100, child: Text(detail, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13))),
-        Expanded(child: Text(summary)),
-      ]),
-      subtitle: warning == null ? null : Text(warning!, style: TextStyle(color: scheme.error)),
-      trailing: IconButton(tooltip: 'Remove from plan', icon: const Icon(Icons.close, size: 18), onPressed: onRemove),
+    return ListenableBuilder(
+      listenable: plan,
+      builder: (context, _) {
+        final p = plan.nvsPlanFor(partition);
+        return AlertDialog(
+          title: Text('Values in $partition'),
+          content: SizedBox(
+            width: 560,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Applied to whatever the partition holds after any write to it, keeping the other entries. '
+                  'A set without a matching entry adds one.', style: TextStyle(color: scheme.outline)),
+              const SizedBox(height: 12),
+              if (p == null)
+                Text('Nothing queued.', style: TextStyle(color: scheme.outline))
+              else ...[
+                for (final e in p.set.entries)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.edit_note),
+                    title: Text('${e.key} = ${e.value}', style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+                    trailing: IconButton(icon: const Icon(Icons.close, size: 18), tooltip: 'Remove', onPressed: () => plan.unstageNvs(partition, e.key)),
+                  ),
+                for (final d in p.delete)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline, color: scheme.error),
+                    title: Text('delete $d', style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+                    trailing: IconButton(icon: const Icon(Icons.close, size: 18), tooltip: 'Remove', onPressed: () => plan.unstageNvs(partition, d)),
+                  ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, children: [
+                FilledButton.tonalIcon(onPressed: () => _add(context), icon: const Icon(Icons.add, size: 18), label: const Text('Set a value…')),
+                FilledButton.tonalIcon(onPressed: () => _delete(context), icon: const Icon(Icons.delete_outline, size: 18), label: const Text('Delete a value…')),
+              ]),
+            ]),
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
+        );
+      },
+    );
+  }
+}
+
+/// The files queued for one filesystem partition: put a file at a path,
+/// delete a path, remove.
+class _FsPlanDialog extends StatelessWidget {
+  const _FsPlanDialog({required this.plan, required this.partition, required this.type});
+  final FlashPlan plan;
+  final String partition;
+  final FsType? type;
+
+  Future<void> _put(BuildContext context) async {
+    final file = await pickFile();
+    if (file == null || !context.mounted) return;
+    final path = await prompt(context, title: 'Put ${file.name}', label: 'Path in the filesystem', initial: file.name, action: 'Queue');
+    if (path == null) return;
+    final problem = plan.stageFsPut(partition, path, file);
+    if (problem != null && context.mounted) await confirm(context, title: 'Not queued', message: problem, action: 'OK');
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final path = await prompt(context, title: 'Delete a file', label: 'Path in the filesystem', hint: 'config/old.json', action: 'Queue delete');
+    if (path == null) return;
+    final problem = plan.stageFsDelete(partition, path);
+    if (problem != null && context.mounted) await confirm(context, title: 'Not queued', message: problem, action: 'OK');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final littlefs = type == FsType.littlefs;
+    return ListenableBuilder(
+      listenable: plan,
+      builder: (context, _) {
+        final p = plan.fsPlanFor(partition);
+        return AlertDialog(
+          title: Text('Files in $partition'),
+          content: SizedBox(
+            width: 560,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                littlefs
+                    ? 'LittleFS images cannot be rebuilt yet, so these edits will fail when flashed; write a whole image instead.'
+                    : 'The partition is read, the changes applied to its files, and a fresh ${type?.label ?? 'filesystem'} image written back. '
+                        'An erased partition starts empty.',
+                style: TextStyle(color: littlefs ? scheme.error : scheme.outline),
+              ),
+              const SizedBox(height: 12),
+              if (p == null)
+                Text('Nothing queued.', style: TextStyle(color: scheme.outline))
+              else ...[
+                for (final e in p.put.entries)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.upload_file),
+                    title: Text(e.key, style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+                    subtitle: Text('${e.value.name} (${e.value.bytes.length.bytesString})'),
+                    trailing: IconButton(icon: const Icon(Icons.close, size: 18), tooltip: 'Remove', onPressed: () => plan.unstageFs(partition, e.key)),
+                  ),
+                for (final d in p.delete)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline, color: scheme.error),
+                    title: Text('delete $d', style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13)),
+                    trailing: IconButton(icon: const Icon(Icons.close, size: 18), tooltip: 'Remove', onPressed: () => plan.unstageFs(partition, d)),
+                  ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, children: [
+                FilledButton.tonalIcon(onPressed: () => _put(context), icon: const Icon(Icons.add, size: 18), label: const Text('Put a file…')),
+                FilledButton.tonalIcon(onPressed: () => _delete(context), icon: const Icon(Icons.delete_outline, size: 18), label: const Text('Delete a file…')),
+              ]),
+            ]),
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
+        );
+      },
+    );
+  }
+}
+
+/// Name and description for a bundle's manifest, with what else the
+/// manifest will carry spelled out.
+class _BundleDetailsDialog extends StatefulWidget {
+  const _BundleDetailsDialog({required this.name, required this.description, required this.chip, required this.erases, required this.edits});
+  final String name;
+  final String description;
+  final EspChip? chip;
+  final List<String> erases;
+  final int edits;
+
+  @override
+  State<_BundleDetailsDialog> createState() => _BundleDetailsDialogState();
+}
+
+class _BundleDetailsDialogState extends State<_BundleDetailsDialog> {
+  late final _name = TextEditingController(text: widget.name);
+  late final _description = TextEditingController(text: widget.description);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  void _save() => Navigator.pop(context, (name: _name.text, description: _description.text));
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final carried = [
+      if (widget.chip case final chip?) 'the chip it is for (${chip.name}), checked before flashing',
+      if (widget.erases.isNotEmpty) 'the erase of ${widget.erases.join(', ')}',
+      if (widget.edits > 0) '${widget.edits} value and file edit${widget.edits == 1 ? '' : 's'}',
+    ];
+    return AlertDialog(
+      title: const Text('Save as bundle'),
+      content: SizedBox(
+        width: 480,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Shown as the heading of the one-click flasher. Both are optional.', style: TextStyle(color: scheme.outline)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _name,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Name', hintText: 'MS5 v0.17.0', border: OutlineInputBorder()),
+            onSubmitted: (_) => _save(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _description,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: 'Description', hintText: 'What this update does', border: OutlineInputBorder()),
+          ),
+          if (carried.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('The manifest also records ${carried.join(' and ')}.', style: TextStyle(color: scheme.outline)),
+          ],
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
     );
   }
 }

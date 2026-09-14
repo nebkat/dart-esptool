@@ -32,3 +32,28 @@ Future<void> showText(BuildContext context, {required String title, required Str
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
       ),
     );
+
+/// Ask for one line of text; `null` if cancelled.
+Future<String?> prompt(BuildContext context, {required String title, String? label, String? hint, String initial = '', String action = 'OK'}) {
+  final controller = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 420,
+        child: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(labelText: label, hintText: hint, border: const OutlineInputBorder()),
+          style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 13),
+          onSubmitted: (v) => Navigator.pop(context, v),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: Text(action)),
+      ],
+    ),
+  ).whenComplete(controller.dispose);
+}

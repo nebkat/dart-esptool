@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:idftool/idftool.dart' show PartitionTable;
 
 import 'pages/data_page.dart';
@@ -16,24 +17,43 @@ import 'widgets/connection_bar.dart';
 import 'widgets/log_panel.dart';
 
 void main() {
+  usePathUrlStrategy();
   runApp(const IdfToolApp());
 }
 
 class IdfToolApp extends StatelessWidget {
   const IdfToolApp({super.key});
 
-  /// `#/oneclick?bundle=<url>` opens the one-click flasher; anything else is
-  /// the full tool. The fragment keeps it working on static hosts (GitHub
-  /// Pages) with no server-side routing.
-  static Widget _entry() {
-    final fragment = Uri.base.fragment;
-    final route = fragment.isEmpty ? null : Uri.tryParse(fragment.startsWith('/') ? fragment : '/$fragment');
-    if (route != null && route.path == '/oneclick') {
-      final bundle = route.queryParameters['bundle'];
-      return OneClickShell(bundleUrl: bundle == null ? null : Uri.tryParse(bundle));
+  /// The one-click flasher's path. `/oneclick?bundle=<url>` is the link to
+  /// hand out; the bundle URL may be relative to the app's own location.
+  static const oneClickPath = '/oneclick';
+
+  /// Which page a route name (the URL, relative to the base href) opens:
+  /// [oneClickPath] is the one-click flasher, anything else the full tool.
+  /// The older `#/oneclick?bundle=<url>` fragment form still works.
+  static Widget _entry(String name) {
+    var route = Uri.tryParse(name);
+    if (route == null || route.path.replaceAll(RegExp(r'/+$'), '') != oneClickPath) {
+      final fragment = Uri.base.fragment;
+      final legacy = fragment.isEmpty ? null : Uri.tryParse(fragment.startsWith('/') ? fragment : '/$fragment');
+      if (legacy == null || legacy.path != oneClickPath) return const HomeShell();
+      route = legacy;
     }
-    return const HomeShell();
+    final bundle = route.queryParameters['bundle'];
+    return OneClickShell(bundleUrl: bundle == null ? null : _appRoot(name).resolve(bundle));
   }
+
+  /// Where the app itself is served from (the base href), so a relative
+  /// bundle URL is relative to that, not to the `/oneclick` page.
+  static Uri _appRoot(String name) {
+    final page = Uri.base;
+    final route = Uri.tryParse(name)?.path ?? '';
+    final path = page.path.endsWith(route) ? page.path.substring(0, page.path.length - route.length) : page.path;
+    return page.replace(path: path.endsWith('/') ? path : '$path/', query: null, fragment: null).removeFragment();
+  }
+
+  static Route<void> _route(RouteSettings settings) =>
+      MaterialPageRoute<void>(settings: settings, builder: (_) => _entry(settings.name ?? '/'));
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +62,8 @@ class IdfToolApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: appTheme(Brightness.light),
       darkTheme: appTheme(Brightness.dark),
-      home: _entry(),
+      onGenerateRoute: _route,
+      onGenerateInitialRoutes: (name) => [_route(RouteSettings(name: name))],
     );
   }
 }

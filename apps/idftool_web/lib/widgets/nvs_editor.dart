@@ -35,7 +35,7 @@ class _NvsEditorState extends State<NvsEditor> {
   Future<void> _editEntry({NvsEntry? existing, String? namespace}) async {
     final result = await showDialog<NvsEdit>(
       context: context,
-      builder: (context) => _EntryDialog(existing: existing, namespace: namespace, namespaces: widget.image.namespaces.values.toSet()),
+      builder: (context) => NvsEntryDialog(existing: existing, namespace: namespace, namespaces: widget.image.namespaces.values.toSet()),
     );
     if (result != null) {
       setState(() {
@@ -170,17 +170,18 @@ class _NvsEditorState extends State<NvsEditor> {
 }
 
 /// Add or edit one entry. Returns the [NvsEdit] to queue.
-class _EntryDialog extends StatefulWidget {
-  const _EntryDialog({this.existing, this.namespace, required this.namespaces});
+/// Namespace, key, type and value for one NVS entry; pops an [NvsEdit].
+class NvsEntryDialog extends StatefulWidget {
+  const NvsEntryDialog({super.key, this.existing, this.namespace, this.namespaces = const {}});
   final NvsEntry? existing;
   final String? namespace;
   final Set<String> namespaces;
 
   @override
-  State<_EntryDialog> createState() => _EntryDialogState();
+  State<NvsEntryDialog> createState() => _NvsEntryDialogState();
 }
 
-class _EntryDialogState extends State<_EntryDialog> {
+class _NvsEntryDialogState extends State<NvsEntryDialog> {
   late final _namespace = TextEditingController(text: widget.existing?.namespace ?? widget.namespace ?? '');
   late final _key = TextEditingController(text: widget.existing?.key ?? '');
   late final _value = TextEditingController(text: widget.existing?.valueText ?? '');
