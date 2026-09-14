@@ -246,7 +246,14 @@ class _OneClickPageState extends State<OneClickPage> {
           const Expanded(child: Divider()),
         ]),
         const SizedBox(height: 20),
-        FilledButton.tonalIcon(onPressed: _fetching ? null : _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
+        Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+          FilledButton.tonalIcon(onPressed: _fetching ? null : _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
+          FilledButton.tonalIcon(
+            onPressed: _fetching ? null : () => Navigator.pushReplacementNamed(context, '/flash'),
+            icon: const Icon(Icons.add_box_outlined),
+            label: const Text('Create a bundle…'),
+          ),
+        ]),
         if (_fileProblem != null) ...[
           const SizedBox(height: 8),
           Text(_fileProblem!, style: TextStyle(color: scheme.error), textAlign: TextAlign.center),

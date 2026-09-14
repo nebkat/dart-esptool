@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:idftool/idftool.dart' show PartitionTable;
 
@@ -30,15 +29,19 @@ class IdfToolApp extends StatelessWidget {
   static const oneClickPath = '/oneclick';
 
   /// Which page a route name (the URL, relative to the base href) opens:
-  /// [oneClickPath] is the one-click flasher, anything else the full tool.
+  /// [oneClickPath] is the one-click flasher, `/<tool>` (`/flash`, say) the
+  /// full tool on that page, anything else the full tool on its first page.
   /// The older `#/oneclick?bundle=<url>` fragment form still works.
   static Widget _entry(String name) {
     if (!DeviceSession.supported) return const UnsupportedBrowserPage();
     var route = Uri.tryParse(name);
-    if (route == null || route.path.replaceAll(RegExp(r'/+$'), '') != oneClickPath) {
+    final path = route?.path.replaceAll(RegExp(r'/+$'), '');
+    if (route == null || path != oneClickPath) {
       final fragment = Uri.base.fragment;
       final legacy = fragment.isEmpty ? null : Uri.tryParse(fragment.startsWith('/') ? fragment : '/$fragment');
-      if (legacy == null || legacy.path != oneClickPath) return const HomeShell();
+      if (legacy == null || legacy.path != oneClickPath) {
+        return HomeShell(initialTool: Tool.values.where((t) => '/${t.name}' == path).firstOrNull ?? Tool.partitions);
+      }
       route = legacy;
     }
     final bundle = route.queryParameters['bundle'];
@@ -76,7 +79,8 @@ enum Tool {
 }
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.initialTool = Tool.partitions});
+  final Tool initialTool;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -84,7 +88,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   final _session = DeviceSession();
-  Tool _tool = Tool.partitions;
+  late Tool _tool = widget.initialTool;
   String? _dataPartition;
   PickedFile? _dataFile;
 
@@ -94,11 +98,19 @@ class _HomeShellState extends State<HomeShell> {
     super.dispose();
   }
 
+  /// Switch page and put it in the address bar (`/flash`), so a reload or
+  /// a shared link lands on the same page.
+  void _select(Tool tool) {
+    _tool = tool;
+    SystemNavigator.routeInformationUpdated(uri: Uri(path: '/${tool.name}'));
+    setState(() {});
+  }
+
   void _planTable(PartitionTable table, String source) {
     for (final note in _session.plan.stageTable(table, source: source)) {
       _session.addLog(note, error: true);
     }
-    setState(() => _tool = Tool.flash);
+    _select(Tool.flash);
   }
 
   void _planBundle(Uint8List zip, String name) {
@@ -110,7 +122,7 @@ class _HomeShellState extends State<HomeShell> {
       _session.addLog(e.message, error: true);
       return;
     }
-    setState(() => _tool = Tool.flash);
+    _select(Tool.flash);
   }
 
   @override
@@ -124,9 +136,9 @@ class _HomeShellState extends State<HomeShell> {
               onBrowse: (name) => setState(() {
                 _dataPartition = name;
                 _dataFile = null;
-                _tool = Tool.data;
+                _select(Tool.data);
               }),
-              onOpenFlash: () => setState(() => _tool = Tool.flash),
+              onOpenFlash: () => _select(Tool.flash),
               onPlanTable: _planTable,
             ),
           Tool.flash => FlashPage(session: _session),
@@ -139,7 +151,7 @@ class _HomeShellState extends State<HomeShell> {
               onOpenData: (file) => setState(() {
                 _dataFile = file;
                 _dataPartition = null;
-                _tool = Tool.data;
+                _select(Tool.data);
               }),
             ),
         };
@@ -154,7 +166,7 @@ class _HomeShellState extends State<HomeShell> {
                   groupAlignment: 0,
                   selectedIndex: _tool.index,
                   labelType: NavigationRailLabelType.all,
-                  onDestinationSelected: (i) => setState(() => _tool = Tool.values[i]),
+                  onDestinationSelected: (i) => _select(Tool.values[i]),
                   destinations: [
                     for (final t in Tool.values) NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
                   ],
@@ -167,7 +179,7 @@ class _HomeShellState extends State<HomeShell> {
                         leading: const Icon(Icons.terminal),
                         content: const Text('The device is being monitored: it is running its app, so reading and flashing are unavailable until it is back in the bootloader.'),
                         actions: [
-                          TextButton(onPressed: () => setState(() => _tool = Tool.monitor), child: const Text('Open monitor')),
+                          TextButton(onPressed: () => _select(Tool.monitor), child: const Text('Open monitor')),
                           FilledButton.tonal(
                             onPressed: _session.busy ? null : () => _session.stopMonitor(enterBootloader: true),
                             child: const Text('Enter bootloader'),
