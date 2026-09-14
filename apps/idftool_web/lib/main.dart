@@ -25,7 +25,7 @@ class IdfToolApp extends StatelessWidget {
   const IdfToolApp({super.key});
 
   /// The one-click flasher's path. `/oneclick?bundle=<url>` is the link to
-  /// hand out; the bundle URL may be relative to the app's own location.
+  /// hand out, with the bundle's absolute URL.
   static const oneClickPath = '/oneclick';
 
   /// Which page a route name (the URL, relative to the base href) opens:
@@ -40,16 +40,7 @@ class IdfToolApp extends StatelessWidget {
       route = legacy;
     }
     final bundle = route.queryParameters['bundle'];
-    return OneClickShell(bundleUrl: bundle == null ? null : _appRoot(name).resolve(bundle));
-  }
-
-  /// Where the app itself is served from (the base href), so a relative
-  /// bundle URL is relative to that, not to the `/oneclick` page.
-  static Uri _appRoot(String name) {
-    final page = Uri.base;
-    final route = Uri.tryParse(name)?.path ?? '';
-    final path = page.path.endsWith(route) ? page.path.substring(0, page.path.length - route.length) : page.path;
-    return page.replace(path: path.endsWith('/') ? path : '$path/', query: null, fragment: null).removeFragment();
+    return OneClickShell(bundleUrl: bundle == null ? null : Uri.tryParse(bundle));
   }
 
   static Route<void> _route(RouteSettings settings) =>

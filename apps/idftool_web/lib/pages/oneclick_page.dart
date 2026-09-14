@@ -1,13 +1,11 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:idftool/idftool.dart';
 
 import '../session/device_session.dart';
 import '../session/flash_plan.dart';
 import '../util/files.dart';
-import '../widgets/empty_state.dart';
 import '../widgets/op_tile.dart';
 import '../widgets/port_picker.dart';
 
@@ -20,6 +18,8 @@ import '../widgets/port_picker.dart';
 class OneClickPage extends StatefulWidget {
   const OneClickPage({super.key, required this.session, this.bundleUrl, this.bundle, this.onBack});
   final DeviceSession session;
+
+  /// The bundle to fetch on arrival, from the link's `?bundle=`.
   final Uri? bundleUrl;
 
   /// A bundle already in hand (the Flash page previewing its plan).
@@ -32,12 +32,19 @@ class OneClickPage extends StatefulWidget {
   State<OneClickPage> createState() => _OneClickPageState();
 }
 
-enum _Phase { loading, loadFailed, ready, flashing, done, failed }
+/// [empty] is the opener (URL row and file button), also where a load is
+/// in flight or has failed — the row itself says so.
+enum _Phase { empty, ready, flashing, done, failed }
 
 class _OneClickPageState extends State<OneClickPage> {
-  _Phase _phase = _Phase.loading;
+  _Phase _phase = _Phase.empty;
   FlashBundle? _bundle;
   String? _problem;
+
+  late final _url = TextEditingController(text: widget.bundleUrl?.toString() ?? '');
+  bool _fetching = false;
+  String? _urlProblem;
+  String? _fileProblem;
   int _currentStep = -1;
   final _completed = <int>{};
   /// The log appears once a device has been connected and stays for good.
@@ -54,59 +61,73 @@ class _OneClickPageState extends State<OneClickPage> {
       _phase = _Phase.ready;
     } else if (url != null) {
       _fetch(url);
-    } else {
-      _phase = _Phase.loadFailed;
-      _problem = null; // no URL: offer the file picker
     }
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  /// Load the URL in the field, and put it in the address bar so the page
+  /// can be shared as a link.
+  void _load() {
+    final text = _url.text.trim();
+    if (text.isEmpty) return setState(() => _urlProblem = 'Enter the URL of a bundle');
+    final url = Uri.tryParse(text);
+    if (url == null || !url.hasScheme || !url.hasAuthority) return setState(() => _urlProblem = 'Enter a full URL, starting with https://');
+    SystemNavigator.routeInformationUpdated(uri: Uri(path: '/oneclick', queryParameters: {'bundle': text}));
+    _fetch(url);
   }
 
   Future<void> _fetch(Uri url) async {
     setState(() {
-      _phase = _Phase.loading;
-      _problem = null;
+      _fetching = true;
+      _urlProblem = null;
+      _fileProblem = null;
     });
     try {
       // The bundle host only needs CORS; the browser sends its cookies for
       // same-site hosts (Cloudflare Access) as usual.
       final response = await http.get(url);
-      if (response.statusCode != 200) throw IdfToolException('HTTP ${response.statusCode} fetching the bundle');
-      _use(response.bodyBytes, url.pathSegments.lastOrNull ?? 'bundle');
+      if (response.statusCode != 200) throw IdfToolException('HTTP ${response.statusCode}');
+      _use(response.bodyBytes, url.pathSegments.lastOrNull ?? 'bundle', fromUrl: true);
     } catch (e) {
-      setState(() {
-        _phase = _Phase.loadFailed;
-        _problem = 'Could not load the bundle from $url: $e';
-      });
+      if (mounted) setState(() => _urlProblem = 'Could not load it: ${e is IdfToolException ? e.message : e}');
+    } finally {
+      if (mounted) setState(() => _fetching = false);
     }
   }
 
   Future<void> _pick() async {
     final file = await pickFile(extensions: ['zip']);
     if (file == null) return;
-    _use(file.bytes, file.name);
+    _use(file.bytes, file.name, fromUrl: false);
   }
 
-  void _use(Uint8List bytes, String name) {
+  void _use(Uint8List bytes, String name, {required bool fromUrl}) {
     try {
       final bundle = FlashBundle.fromZip(bytes, source: name);
       setState(() {
         _bundle = bundle;
         _phase = _Phase.ready;
         _problem = null;
+        _urlProblem = null;
+        _fileProblem = null;
         _completed.clear();
         _currentStep = -1;
       });
     } catch (e) {
-      setState(() {
-        _phase = _Phase.loadFailed;
-        _problem = '$name is not a usable bundle: $e';
-      });
+      final problem = '$name is not a usable bundle: ${e is IdfToolException ? e.message : e}';
+      setState(() => fromUrl ? _urlProblem = problem : _fileProblem = problem);
     }
   }
 
-  /// Drop the bundle and go back to the empty page.
+  /// Drop the bundle and go back to the opener.
   void _close() => setState(() {
         _bundle = null;
-        _phase = _Phase.loadFailed;
+        _phase = _Phase.empty;
         _problem = null;
         _completed.clear();
         _currentStep = -1;
@@ -171,18 +192,7 @@ class _OneClickPageState extends State<OneClickPage> {
                 ),
               ),
             switch (_phase) {
-              _Phase.loading => const LoadingState('Loading the update…'),
-              _Phase.loadFailed => EmptyState(
-                  icon: _problem == null ? Icons.unarchive_outlined : Icons.error_outline,
-                  title: _problem == null ? 'No bundle opened' : 'Could not open the bundle',
-                  message: _problem ?? 'Open a firmware bundle to review its steps, then connect a device and flash it.',
-                  error: _problem != null,
-                  actions: [
-                    if (_problem != null && widget.bundleUrl != null)
-                      FilledButton.tonalIcon(onPressed: () => _fetch(widget.bundleUrl!), icon: const Icon(Icons.refresh), label: const Text('Retry')),
-                    FilledButton.tonalIcon(onPressed: _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
-                  ],
-                ),
+              _Phase.empty => _opener(theme),
               _ => _bundleCard(bundle!, theme),
             },
             if (_logShown) ...[
@@ -192,6 +202,60 @@ class _OneClickPageState extends State<OneClickPage> {
           ]),
         ),
       ),
+    );
+  }
+
+  /// Two ways in: a bundle at a URL (the row a `?bundle=` link lands on,
+  /// loading or failing in place) or a bundle file.
+  Widget _opener(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.unarchive_outlined, size: 40, color: scheme.outline),
+        const SizedBox(height: 12),
+        Text('Open a firmware bundle', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 6),
+        Text('Review its steps, then connect a device and flash it.', style: TextStyle(color: scheme.outline), textAlign: TextAlign.center),
+        const SizedBox(height: 24),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: TextField(
+              controller: _url,
+              enabled: !_fetching,
+              decoration: InputDecoration(
+                labelText: 'Bundle URL',
+                hintText: 'https://example.com/firmware/device-v1.2.0.zip',
+                border: const OutlineInputBorder(),
+                errorText: _urlProblem,
+                errorMaxLines: 3,
+              ),
+              onSubmitted: (_) => _load(),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            height: 56,
+            child: FilledButton.tonalIcon(
+              onPressed: _fetching ? null : _load,
+              icon: _fetching ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.download),
+              label: Text(_fetching ? 'Loading…' : 'Load'),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 20),
+        Row(children: [
+          const Expanded(child: Divider()),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text('or', style: TextStyle(color: scheme.outline))),
+          const Expanded(child: Divider()),
+        ]),
+        const SizedBox(height: 20),
+        FilledButton.tonalIcon(onPressed: _fetching ? null : _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
+        if (_fileProblem != null) ...[
+          const SizedBox(height: 8),
+          Text(_fileProblem!, style: TextStyle(color: scheme.error), textAlign: TextAlign.center),
+        ],
+      ]),
     );
   }
 
