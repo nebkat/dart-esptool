@@ -7,6 +7,7 @@ import 'package:idftool/idftool.dart';
 import '../session/device_session.dart';
 import '../session/flash_plan.dart';
 import '../util/files.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/op_tile.dart';
 import '../widgets/port_picker.dart';
 
@@ -39,7 +40,8 @@ class _OneClickPageState extends State<OneClickPage> {
   String? _problem;
   int _currentStep = -1;
   final _completed = <int>{};
-  bool _showLog = false;
+  /// The log appears once a device has been connected and stays for good.
+  bool _logShown = false;
 
   DeviceSession get session => widget.session;
 
@@ -101,6 +103,15 @@ class _OneClickPageState extends State<OneClickPage> {
     }
   }
 
+  /// Drop the bundle and go back to the empty page.
+  void _close() => setState(() {
+        _bundle = null;
+        _phase = _Phase.loadFailed;
+        _problem = null;
+        _completed.clear();
+        _currentStep = -1;
+      });
+
   Future<void> _flash() async {
     final bundle = _bundle!;
     setState(() {
@@ -145,6 +156,7 @@ class _OneClickPageState extends State<OneClickPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bundle = _bundle;
+    if (session.connected) _logShown = true;
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
@@ -159,25 +171,24 @@ class _OneClickPageState extends State<OneClickPage> {
                 ),
               ),
             switch (_phase) {
-              _Phase.loading => const Row(children: [
-                  SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                  SizedBox(width: 12),
-                  Text('Loading the update…'),
-                ]),
-              _Phase.loadFailed => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  if (_problem != null) ...[
-                    Text(_problem!, style: TextStyle(color: theme.colorScheme.error)),
-                    const SizedBox(height: 12),
-                  ],
-                  Wrap(spacing: 8, children: [
-                    if (widget.bundleUrl != null) FilledButton.tonal(onPressed: () => _fetch(widget.bundleUrl!), child: const Text('Retry')),
+              _Phase.loading => const LoadingState('Loading the update…'),
+              _Phase.loadFailed => EmptyState(
+                  icon: _problem == null ? Icons.unarchive_outlined : Icons.error_outline,
+                  title: _problem == null ? 'No bundle opened' : 'Could not open the bundle',
+                  message: _problem ?? 'Open a bundle to see what it will do to the device, then connect and flash it.',
+                  error: _problem != null,
+                  actions: [
+                    if (_problem != null && widget.bundleUrl != null)
+                      FilledButton.tonalIcon(onPressed: () => _fetch(widget.bundleUrl!), icon: const Icon(Icons.refresh), label: const Text('Retry')),
                     FilledButton.tonalIcon(onPressed: _pick, icon: const Icon(Icons.folder_open), label: const Text('Open a bundle file…')),
-                  ]),
-                ]),
+                  ],
+                ),
               _ => _bundleCard(bundle!, theme),
             },
-            const SizedBox(height: 16),
-            _logDisclosure(theme),
+            if (_logShown) ...[
+              const SizedBox(height: 16),
+              _log(theme),
+            ],
           ]),
         ),
       ),
@@ -190,7 +201,15 @@ class _OneClickPageState extends State<OneClickPage> {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(bundle.name, style: theme.textTheme.titleLarge),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Text(bundle.name, style: theme.textTheme.titleLarge)),
+            if (widget.bundle == null)
+              IconButton(
+                tooltip: 'Close this bundle',
+                icon: const Icon(Icons.close),
+                onPressed: flashing ? null : _close,
+              ),
+          ]),
           if (bundle.description != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(bundle.description!)),
           if (bundle.chip != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('For ${bundle.chip!.name}', style: theme.textTheme.bodySmall)),
           const SizedBox(height: 16),
@@ -351,25 +370,15 @@ class _OneClickPageState extends State<OneClickPage> {
     ]);
   }
 
-  Widget _logDisclosure(ThemeData theme) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TextButton.icon(
-        onPressed: () => setState(() => _showLog = !_showLog),
-        icon: Icon(_showLog ? Icons.expand_less : Icons.expand_more, size: 18),
-        label: Text(_showLog ? 'Hide log' : 'Show log'),
-      ),
-      if (_showLog)
-        Container(
-          height: 220,
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(border: Border.all(color: theme.dividerColor), borderRadius: BorderRadius.circular(8)),
-          child: SelectionArea(
-            child: ListView(children: [
-              for (final l in session.log)
-                Text(l.message, style: TextStyle(fontFamily: 'RobotoMono', fontSize: 12, color: l.error ? theme.colorScheme.error : null)),
-            ]),
-          ),
+  Widget _log(ThemeData theme) => Container(
+        height: 220,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(border: Border.all(color: theme.dividerColor), borderRadius: BorderRadius.circular(8)),
+        child: SelectionArea(
+          child: ListView(children: [
+            for (final l in session.log)
+              Text(l.message, style: TextStyle(fontFamily: 'RobotoMono', fontSize: 12, color: l.error ? theme.colorScheme.error : null)),
+          ]),
         ),
-    ]);
-  }
+      );
 }
