@@ -14,6 +14,7 @@ import 'session/device_session.dart';
 import 'util/files.dart';
 import 'theme.dart';
 import 'widgets/connection_bar.dart';
+import 'widgets/empty_state.dart';
 import 'widgets/log_panel.dart';
 
 void main() {
@@ -32,6 +33,7 @@ class IdfToolApp extends StatelessWidget {
   /// [oneClickPath] is the one-click flasher, anything else the full tool.
   /// The older `#/oneclick?bundle=<url>` fragment form still works.
   static Widget _entry(String name) {
+    if (!DeviceSession.supported) return const UnsupportedBrowserPage();
     var route = Uri.tryParse(name);
     if (route == null || route.path.replaceAll(RegExp(r'/+$'), '') != oneClickPath) {
       final fragment = Uri.base.fragment;
@@ -113,16 +115,6 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (!DeviceSession.supported) {
-      return const Scaffold(
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: Text('This tool needs the Web Serial API — open it in Chrome or Edge over https:// or localhost.'),
-          ),
-        ),
-      );
-    }
     return ListenableBuilder(
       listenable: _session,
       builder: (context, _) {
@@ -216,4 +208,20 @@ class _OneClickShellState extends State<OneClickShell> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: _session, builder: (context, _) => OneClickPage(session: _session, bundleUrl: widget.bundleUrl));
+}
+
+/// The whole page when the browser has no Web Serial: nothing here can work
+/// without it.
+class UnsupportedBrowserPage extends StatelessWidget {
+  const UnsupportedBrowserPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: EmptyState(
+          icon: Icons.usb_off,
+          title: 'This browser cannot connect to devices',
+          message: 'Talking to a device over USB needs Web Serial, which only Chrome, Edge and Opera on a desktop computer provide. '
+              'Open this page in one of those.',
+        ),
+      );
 }

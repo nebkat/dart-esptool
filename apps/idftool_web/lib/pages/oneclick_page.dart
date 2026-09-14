@@ -94,7 +94,7 @@ class _OneClickPageState extends State<OneClickPage> {
       if (response.statusCode != 200) throw IdfToolException('HTTP ${response.statusCode}');
       _use(response.bodyBytes, url.pathSegments.lastOrNull ?? 'bundle', fromUrl: true);
     } catch (e) {
-      if (mounted) setState(() => _urlProblem = 'Could not load it: ${e is IdfToolException ? e.message : e}');
+      if (mounted) setState(() => _urlProblem = 'Could not load bundle: ${e is IdfToolException ? e.message : e}');
     } finally {
       if (mounted) setState(() => _fetching = false);
     }
@@ -226,7 +226,6 @@ class _OneClickPageState extends State<OneClickPage> {
               decoration: InputDecoration(
                 labelText: 'Bundle URL',
                 hintText: 'https://example.com/firmware/device-v1.2.0.zip',
-                border: const OutlineInputBorder(),
                 errorText: _urlProblem,
                 errorMaxLines: 3,
               ),
@@ -234,13 +233,10 @@ class _OneClickPageState extends State<OneClickPage> {
             ),
           ),
           const SizedBox(width: 12),
-          SizedBox(
-            height: 56,
-            child: FilledButton.tonalIcon(
-              onPressed: _fetching ? null : _load,
-              icon: _fetching ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.download),
-              label: Text(_fetching ? 'Loading…' : 'Load'),
-            ),
+          FilledButton.tonalIcon(
+            onPressed: _fetching ? null : _load,
+            icon: _fetching ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.download),
+            label: Text(_fetching ? 'Loading…' : 'Load'),
           ),
         ]),
         const SizedBox(height: 20),
@@ -376,9 +372,6 @@ class _OneClickPageState extends State<OneClickPage> {
 
   Widget _connectAndFlash(ThemeData theme) {
     final flashing = _phase == _Phase.flashing;
-    if (!DeviceSession.supported) {
-      return Text('This needs the Web Serial API — open this page in Chrome or Edge.', style: TextStyle(color: theme.colorScheme.error));
-    }
     if (!session.connected) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Plug the device in over USB, then connect. Chrome will ask which port to use.'),
