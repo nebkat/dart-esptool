@@ -175,7 +175,7 @@ class _OneClickPageState extends State<OneClickPage> {
               _Phase.loadFailed => EmptyState(
                   icon: _problem == null ? Icons.unarchive_outlined : Icons.error_outline,
                   title: _problem == null ? 'No bundle opened' : 'Could not open the bundle',
-                  message: _problem ?? 'Open a bundle to see what it will do to the device, then connect and flash it.',
+                  message: _problem ?? 'Open a firmware bundle to review its steps, then connect a device and flash it.',
                   error: _problem != null,
                   actions: [
                     if (_problem != null && widget.bundleUrl != null)
