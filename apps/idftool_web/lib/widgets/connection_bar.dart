@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../session/device_session.dart';
+import 'app_title.dart';
 import 'dropdown.dart';
 import 'port_picker.dart';
 
-/// The always-visible connection bar: port, reset strategy, stub toggle and
-/// connect/disconnect, so any page can (re)connect.
+/// The always-visible connection bar: the app's title, then port, reset
+/// strategy, stub toggle and connect/disconnect, so any page can (re)connect.
 class ConnectionBar extends StatelessWidget {
   const ConnectionBar({super.key, required this.session});
   final DeviceSession session;
@@ -25,6 +26,7 @@ class ConnectionBar extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              const AppTitle(),
               PortPicker(session: session, enabled: !locked),
               Tooltip(
                 message: 'Connect briefly to every granted port to learn its chip and MAC (each device is reset)',
